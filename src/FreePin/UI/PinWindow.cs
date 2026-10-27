@@ -14,10 +14,15 @@ namespace FreePin.UI
     public sealed class PinWindow : Window
     {
         private readonly BitmapSource _image;
+        private readonly bool _doubleClickCloses;
+        private readonly Action<BitmapSource> _recognizeText;
 
-        public PinWindow(BitmapSource image, double dpiScale)
+        public PinWindow(BitmapSource image, double dpiScale, bool doubleClickCloses = true,
+            Action<BitmapSource> recognizeText = null)
         {
             _image = image ?? throw new ArgumentNullException(nameof(image));
+            _doubleClickCloses = doubleClickCloses;
+            _recognizeText = recognizeText;
             if (dpiScale <= 0)
                 dpiScale = 1;
 
@@ -63,6 +68,7 @@ namespace FreePin.UI
 
             var menu = UiTheme.ContextMenu(
                 UiTheme.MenuItem("复制图片", (s, e) => CopyImage()),
+                UiTheme.MenuItem("识别文字", (s, e) => RecognizeText()),
                 UiTheme.MenuItem("另存为...", (s, e) => SaveAs()),
                 new Separator(),
                 UiTheme.MenuItem("关闭贴图", (s, e) => Close()));
@@ -72,6 +78,12 @@ namespace FreePin.UI
             MouseLeftButtonDown += (s, e) =>
             {
                 Activate();
+                if (e.ClickCount == 2 && _doubleClickCloses)
+                {
+                    Close();
+                    e.Handled = true;
+                    return;
+                }
                 if (e.ButtonState == MouseButtonState.Pressed)
                 {
                     try { DragMove(); }
@@ -98,6 +110,21 @@ namespace FreePin.UI
             catch (Exception ex)
             {
                 MessageBox.Show(this, "复制失败：" + ex.Message, "FreePin",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void RecognizeText()
+        {
+            if (_recognizeText == null)
+                return;
+            try
+            {
+                _recognizeText(_image);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "文字识别失败：" + ex.Message, "FreePin",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }

@@ -410,7 +410,8 @@ namespace FreePin
             if (source == null)
                 return;
 
-            var pin = new PinWindow(source, ScreenCapture.PrimaryScale)
+            var pin = new PinWindow(source, ScreenCapture.PrimaryScale,
+                _settings.PinDoubleClickCloses, ShowOcr)
             {
                 WindowStartupLocation = WindowStartupLocation.Manual
             };

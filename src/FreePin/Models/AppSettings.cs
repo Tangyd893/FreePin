@@ -14,6 +14,7 @@ namespace FreePin.Models
         public bool RememberCaptureStyle { get; set; } = true;
         public string CaptureColor { get; set; } = "#B44E32";
         public double CaptureThickness { get; set; } = 3;
+        public bool PinDoubleClickCloses { get; set; } = true;
 
         public HotkeyBinding ScreenshotHotkey { get; set; } = HotkeyBinding.DefaultScreenshot();
         public HotkeyBinding PinHotkey { get; set; } = HotkeyBinding.DefaultPin();
@@ -62,6 +63,7 @@ namespace FreePin.Models
                 RememberCaptureStyle = RememberCaptureStyle,
                 CaptureColor = CaptureColor,
                 CaptureThickness = CaptureThickness,
+                PinDoubleClickCloses = PinDoubleClickCloses,
                 ScreenshotHotkey = ScreenshotHotkey.Clone(),
                 PinHotkey = PinHotkey.Clone(),
                 CacheHotkey = CacheHotkey.Clone(),

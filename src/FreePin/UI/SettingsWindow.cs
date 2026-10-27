@@ -24,6 +24,7 @@ namespace FreePin.UI
         private readonly TextBox _path;
         private readonly CheckBox _cacheEnabled;
         private readonly CheckBox _rememberCaptureStyle;
+        private readonly CheckBox _pinDoubleClickCloses;
         private HotkeyAction? _captureAction;
 
         public SettingsWindow(AppSettings draft, Func<AppSettings, string> save)
@@ -74,6 +75,20 @@ namespace FreePin.UI
             styleHint.TextWrapping = TextWrapping.Wrap;
             styleHint.Margin = new Thickness(0, 0, 0, 14);
             content.Children.Add(styleHint);
+
+            content.Children.Add(SectionTitle("贴图"));
+            _pinDoubleClickCloses = new CheckBox
+            {
+                Content = "双击贴图窗口关闭",
+                IsChecked = _draft.PinDoubleClickCloses,
+                Foreground = UiTheme.Brush(UiTheme.Foreground),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            content.Children.Add(_pinDoubleClickCloses);
+            var pinHint = UiTheme.Text("关闭后双击只做激活，不会关闭贴图；右键菜单仍可关闭。", 12, UiTheme.Muted);
+            pinHint.TextWrapping = TextWrapping.Wrap;
+            pinHint.Margin = new Thickness(0, 0, 0, 14);
+            content.Children.Add(pinHint);
 
             content.Children.Add(SectionTitle("截图缓存"));
             var cachePanel = new StackPanel();
@@ -324,6 +339,7 @@ namespace FreePin.UI
             _draft.CacheMaxCount = maxCount;
             _draft.CachePath = path;
             _draft.RememberCaptureStyle = _rememberCaptureStyle.IsChecked == true;
+            _draft.PinDoubleClickCloses = _pinDoubleClickCloses.IsChecked == true;
 
             foreach (var pair in _hotkeyChecks)
                 HotkeyManager.GetBinding(_draft, pair.Key).Enabled = pair.Value.IsChecked == true;

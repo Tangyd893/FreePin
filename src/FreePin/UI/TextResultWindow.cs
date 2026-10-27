@@ -17,6 +17,7 @@ namespace FreePin.UI
             MinHeight = 360;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = false;
+            Topmost = true;
             UiTheme.ApplyWindow(this);
 
             var root = new DockPanel { Margin = new Thickness(14) };
@@ -53,7 +54,7 @@ namespace FreePin.UI
             DockPanel.SetDock(toolbar, Dock.Top);
             root.Children.Add(toolbar);
 
-            var status = UiTheme.Text("可直接选择文字后复制。", 12, UiTheme.Muted);
+            var status = UiTheme.Text("识别结果可直接编辑，改完再复制。", 12, UiTheme.Muted);
             status.Margin = new Thickness(0, 8, 0, 0);
             _status = status;
             DockPanel.SetDock(status, Dock.Bottom);
@@ -86,7 +87,7 @@ namespace FreePin.UI
             var textBox = new TextBox
             {
                 Text = text ?? string.Empty,
-                IsReadOnly = true,
+                IsReadOnly = false,
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -108,7 +109,7 @@ namespace FreePin.UI
             Loaded += (s, e) =>
             {
                 textBox.Focus();
-                textBox.SelectAll();
+                textBox.CaretIndex = textBox.Text.Length;
             };
         }
 
