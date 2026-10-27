@@ -46,6 +46,8 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Xaml" />
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
@@ -78,6 +80,7 @@
     <Compile Include="Services\HotkeyManager.cs" />
     <Compile Include="Services\ScreenCapture.cs" />
     <Compile Include="Services\OcrService.cs" />
+    <Compile Include="Services\SmartSelectionService.cs" />
     <Compile Include="Annotations\Annotation.cs" />
     <Compile Include="Annotations\ShapeAnnotations.cs" />
     <Compile Include="Annotations\FreehandAnnotation.cs" />

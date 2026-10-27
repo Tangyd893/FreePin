@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Threading.Tasks;
 using FreePin.Native;
 using System.Windows.Threading;
 using FreePin.Annotations;
@@ -46,11 +47,16 @@ namespace FreePin.UI
         private Rect _toolbarRect;
         private bool _placing;
         private bool _finished;
+        private readonly bool _smartSelectionEnabled;
+        private readonly SmartSelectionService _smartSelection;
+        private readonly DispatcherTimer _smartTimer;
+        private Point _smartPointer;
+        private int _smartRequest;
 
         public CaptureStyle CurrentStyle { get; }
 
         public CaptureOverlayWindow(ScreenFrame frame, double dpiScale, Action<CaptureResult> completed,
-            CaptureStyle initialStyle = null)
+            CaptureStyle initialStyle = null, bool smartSelectionEnabled = true)
         {
             _frame = frame ?? throw new ArgumentNullException(nameof(frame));
             _completed = completed;
@@ -75,7 +81,20 @@ namespace FreePin.UI
             CurrentStyle = _surface.Style;
             _surface.Width = Width;
             _surface.Height = Height;
-            _surface.SelectionChanged += (s, e) => UpdateChrome();
+
+            _smartSelectionEnabled = smartSelectionEnabled;
+            if (_smartSelectionEnabled)
+            {
+                _smartSelection = new SmartSelectionService();
+                _smartTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+                _smartTimer.Tick += (s, e) => RequestSmartDetection();
+            }
+
+            _surface.SelectionChanged += (s, e) =>
+            {
+                CancelSmartDetection();
+                UpdateChrome();
+            };
             _surface.AnnotationsChanged += (s, e) => UpdateHistory();
             _surface.StyleChanged += (s, e) =>
             {
@@ -88,7 +107,7 @@ namespace FreePin.UI
                 UpdateCursorForToolbar();
                 UpdateMagnifier();
             };
-            _surface.CursorMoved += (s, e) => UpdateMagnifier();
+            _surface.CursorMoved += OnSurfaceCursorMoved;
             root.Children.Add(_surface);
 
             _magnifier = new PixelMagnifier();
@@ -116,6 +135,9 @@ namespace FreePin.UI
             PreviewKeyDown += OnPreviewKeyDown;
             Closed += (s, e) =>
             {
+                CancelSmartDetection();
+                if (_smartSelection != null)
+                    _smartSelection.Dispose();
                 _frame.Dispose();
                 if (!_finished)
                 {
@@ -128,6 +150,7 @@ namespace FreePin.UI
                 _surface.Focus();
                 Keyboard.Focus(_surface);
                 UpdateChrome();
+                OnSurfaceCursorMoved(s, e);
             };
         }
 
@@ -285,6 +308,88 @@ namespace FreePin.UI
             }
 
             return new Rect(Math.Round(x), Math.Round(y), Math.Round(width), Math.Round(height));
+        }
+
+        private void OnSurfaceCursorMoved(object sender, EventArgs e)
+        {
+            UpdateMagnifier();
+            if (!_smartSelectionEnabled || _finished || _surface.HasSelection ||
+                _surface.IsCreatingSelection || _surface.IsSmartPendingClick ||
+                _surface.IsDrawingAnnotation)
+            {
+                CancelSmartDetection();
+                return;
+            }
+
+            _smartPointer = GetCursorScreen();
+            if (_smartTimer == null)
+            {
+                RequestSmartDetection();
+                return;
+            }
+            _smartTimer.Stop();
+            _smartTimer.Start();
+        }
+
+        private void CancelSmartDetection()
+        {
+            if (_smartTimer != null)
+                _smartTimer.Stop();
+            _smartRequest++;
+        }
+
+        private void RequestSmartDetection()
+        {
+            if (_smartTimer != null)
+                _smartTimer.Stop();
+            if (!_smartSelectionEnabled || _finished || _surface.HasSelection ||
+                _surface.IsCreatingSelection || _surface.IsSmartPendingClick)
+            {
+                return;
+            }
+
+            int request = ++_smartRequest;
+            Point pointer = _smartPointer;
+            _ = DetectSmartAsync(pointer, request);
+        }
+
+        private async Task DetectSmartAsync(Point pointer, int request)
+        {
+            try
+            {
+                SmartSelectionCandidate candidate = await _smartSelection.DetectAsync(pointer.X, pointer.Y);
+                if (_finished || request != _smartRequest || !_smartSelectionEnabled ||
+                    _surface.HasSelection || _surface.IsCreatingSelection || _surface.IsSmartPendingClick)
+                {
+                    return;
+                }
+
+                if (candidate == null)
+                {
+                    _surface.ClearSmartCandidate();
+                    return;
+                }
+
+                DrawingRectangle bounds = candidate.Bounds;
+                _surface.SetSmartCandidate(new DrawingRectangle(
+                    bounds.X - _frame.Bounds.Left,
+                    bounds.Y - _frame.Bounds.Top,
+                    bounds.Width,
+                    bounds.Height));
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("智能选区检测失败: " + ex.Message);
+            }
+        }
+
+        private Point GetCursorScreen()
+        {
+            NativeMethods.POINT point;
+            if (NativeMethods.GetCursorPos(out point))
+                return new Point(point.X, point.Y);
+            return new Point(_frame.Bounds.Left + _surface.MagnifierAnchor.X,
+                _frame.Bounds.Top + _surface.MagnifierAnchor.Y);
         }
 
         private void UpdateMagnifier()

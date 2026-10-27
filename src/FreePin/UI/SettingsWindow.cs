@@ -24,6 +24,7 @@ namespace FreePin.UI
         private readonly TextBox _path;
         private readonly CheckBox _cacheEnabled;
         private readonly CheckBox _rememberCaptureStyle;
+        private readonly CheckBox _smartSelection;
         private readonly CheckBox _pinDoubleClickCloses;
         private HotkeyAction? _captureAction;
 
@@ -75,6 +76,20 @@ namespace FreePin.UI
             styleHint.TextWrapping = TextWrapping.Wrap;
             styleHint.Margin = new Thickness(0, 0, 0, 14);
             content.Children.Add(styleHint);
+
+            _smartSelection = new CheckBox
+            {
+                Content = "启用智能选区（悬停窗口/控件，单击选中）",
+                IsChecked = _draft.SmartSelectionEnabled,
+                Foreground = UiTheme.Brush(UiTheme.Foreground),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            content.Children.Add(_smartSelection);
+            var smartHint = UiTheme.Text("单击高亮区域直接选中；拖动鼠标仍可自由框选。关闭后只保留自由框选。",
+                12, UiTheme.Muted);
+            smartHint.TextWrapping = TextWrapping.Wrap;
+            smartHint.Margin = new Thickness(0, 0, 0, 14);
+            content.Children.Add(smartHint);
 
             content.Children.Add(SectionTitle("贴图"));
             _pinDoubleClickCloses = new CheckBox
@@ -339,6 +354,7 @@ namespace FreePin.UI
             _draft.CacheMaxCount = maxCount;
             _draft.CachePath = path;
             _draft.RememberCaptureStyle = _rememberCaptureStyle.IsChecked == true;
+            _draft.SmartSelectionEnabled = _smartSelection.IsChecked == true;
             _draft.PinDoubleClickCloses = _pinDoubleClickCloses.IsChecked == true;
 
             foreach (var pair in _hotkeyChecks)

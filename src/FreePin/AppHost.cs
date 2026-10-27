@@ -179,7 +179,8 @@ namespace FreePin
             {
                 ScreenFrame frame = ScreenCapture.CaptureVirtualScreen();
                 var style = CreateInitialCaptureStyle();
-                var overlay = new CaptureOverlayWindow(frame, frame.Scale, OnCaptureResult, style);
+                var overlay = new CaptureOverlayWindow(frame, frame.Scale, OnCaptureResult, style,
+                    _settings.SmartSelectionEnabled);
                 _overlay = overlay;
                 overlay.Closed += (s, e) =>
                 {

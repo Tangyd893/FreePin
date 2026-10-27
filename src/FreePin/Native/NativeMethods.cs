@@ -51,16 +51,43 @@ namespace FreePin.Native
             public int Bottom;
         }
 
-        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
         [DllImport("user32.dll")]
-        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+        public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
         [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
 
         [DllImport("user32.dll")]
-        private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+        [DllImport("user32.dll")]
+        public static extern int GetWindowLong(IntPtr hWnd, int index);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
+
+        private const int DwmwaExtendedFrameBounds = 9;
+        private const int DwmwaCloaked = 14;
 
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
         private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
@@ -68,9 +95,11 @@ namespace FreePin.Native
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
         private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
 
-        private const int GwlExStyle = -20;
+        public const int GwlExStyle = -20;
         private const long WsExToolWindow = 0x00000080L;
         private const long WsExAppWindow = 0x00040000L;
+        public const int GwlStyle = -16;
+        public const long WsExTransparent = 0x00000020L;
 
         public static void MarkToolWindow(IntPtr hWnd)
         {
@@ -165,6 +194,49 @@ namespace FreePin.Native
                 GetSystemMetrics(SmYVirtualScreen),
                 GetSystemMetrics(SmCxVirtualScreen),
                 GetSystemMetrics(SmCyVirtualScreen));
+        }
+
+        public static bool IsWindowCloaked(IntPtr hWnd)
+        {
+            int cloaked;
+            int result;
+            try
+            {
+                result = DwmGetWindowAttribute(hWnd, DwmwaCloaked, out cloaked, sizeof(int));
+            }
+            catch
+            {
+                return false;
+            }
+            return result == 0 && cloaked != 0;
+        }
+
+        public static bool TryGetExtendedFrameBounds(IntPtr hWnd, out RECT rect)
+        {
+            try
+            {
+                return DwmGetWindowAttribute(hWnd, DwmwaExtendedFrameBounds,
+                    out rect, Marshal.SizeOf(typeof(RECT))) == 0;
+            }
+            catch
+            {
+                rect = new RECT();
+                return false;
+            }
+        }
+
+        public static string GetWindowTitle(IntPtr hWnd)
+        {
+            var buffer = new System.Text.StringBuilder(512);
+            int length = GetWindowText(hWnd, buffer, buffer.Capacity);
+            return length > 0 ? buffer.ToString() : string.Empty;
+        }
+
+        public static string GetWindowClassName(IntPtr hWnd)
+        {
+            var buffer = new System.Text.StringBuilder(256);
+            int length = GetClassName(hWnd, buffer, buffer.Capacity);
+            return length > 0 ? buffer.ToString() : string.Empty;
         }
     }
 }

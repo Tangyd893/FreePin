@@ -23,6 +23,7 @@ namespace FreePin.UI
         private const double HandleSize = 7;
         private const double HandleHitTolerance = 8;
         private const double MinSelection = 2;
+        private const double SmartDragThreshold = 4;
 
         private readonly ScreenFrame _frame;
         private readonly double _scale;
@@ -32,6 +33,10 @@ namespace FreePin.UI
         private readonly CaptureStyle _style;
 
         private DrawingRectangle _selection;
+        private DrawingRectangle _smartCandidate;
+        private bool _hasSmartCandidate;
+        private bool _smartPendingClick;
+        private Point _smartDownPhysical;
         private CaptureTool _tool = CaptureTool.Select;
         private CaptureTool _toolBeforeEyedropper = CaptureTool.Pen;
         private SelectionHandle _handle = SelectionHandle.None;
@@ -81,6 +86,21 @@ namespace FreePin.UI
         public bool HasSelection
         {
             get { return _selection.Width >= MinSelection && _selection.Height >= MinSelection; }
+        }
+
+        public bool HasSmartCandidate
+        {
+            get { return _hasSmartCandidate; }
+        }
+
+        public DrawingRectangle SmartCandidate
+        {
+            get { return _smartCandidate; }
+        }
+
+        public bool IsSmartPendingClick
+        {
+            get { return _smartPendingClick; }
         }
 
         public bool IsCreatingSelection
@@ -253,6 +273,19 @@ namespace FreePin.UI
                 InvalidateVisual();
                 return true;
             }
+            if (_smartPendingClick)
+            {
+                _smartPendingClick = false;
+                ReleaseMouseCapture();
+                ClearSmartCandidate();
+                UpdateCursor();
+                return true;
+            }
+            if (_hasSmartCandidate)
+            {
+                ClearSmartCandidate();
+                return true;
+            }
             if (_creating)
             {
                 _creating = false;
@@ -263,6 +296,44 @@ namespace FreePin.UI
                 return true;
             }
             return false;
+        }
+
+        public void SetSmartCandidate(DrawingRectangle bounds)
+        {
+            if (_smartPendingClick || HasSelection || _creating || _resizing || _moving || _drawing ||
+                _draggingAnnotation || _textBox != null)
+            {
+                return;
+            }
+
+            int left = Math.Max(0, Math.Min(_frame.Bounds.Width, bounds.Left));
+            int top = Math.Max(0, Math.Min(_frame.Bounds.Height, bounds.Top));
+            int right = Math.Max(0, Math.Min(_frame.Bounds.Width, bounds.Right));
+            int bottom = Math.Max(0, Math.Min(_frame.Bounds.Height, bounds.Bottom));
+            if (right - left < MinSelection || bottom - top < MinSelection)
+            {
+                ClearSmartCandidate();
+                return;
+            }
+
+            var candidate = new DrawingRectangle(left, top, right - left, bottom - top);
+            if (_hasSmartCandidate && _smartCandidate == candidate)
+                return;
+
+            _smartCandidate = candidate;
+            _hasSmartCandidate = true;
+            UpdateCursor();
+            InvalidateVisual();
+        }
+
+        public void ClearSmartCandidate()
+        {
+            if (!_hasSmartCandidate)
+                return;
+            _hasSmartCandidate = false;
+            _smartCandidate = new DrawingRectangle();
+            UpdateCursor();
+            InvalidateVisual();
         }
 
         public void PickColor(Point physicalPoint)
@@ -415,9 +486,25 @@ namespace FreePin.UI
             }
             else
             {
+                if (_hasSmartCandidate)
+                    DrawSmartCandidate(dc);
                 DrawHint(dc, full);
             }
 
+        }
+
+        private void DrawSmartCandidate(DrawingContext dc)
+        {
+            Rect candidate = ToLogical(_smartCandidate);
+            if (candidate.Width < 2 || candidate.Height < 2)
+                return;
+
+            Color accent = UiTheme.Accent;
+            var fill = new SolidColorBrush(Color.FromArgb(20, accent.R, accent.G, accent.B));
+            fill.Freeze();
+            var pen = new Pen(new SolidColorBrush(accent), 1.6);
+            pen.Freeze();
+            dc.DrawRectangle(fill, pen, candidate);
         }
 
         private void DrawAnnotations(DrawingContext dc)
@@ -493,7 +580,10 @@ namespace FreePin.UI
 
             if (!HasSelection)
             {
-                BeginCreate();
+                if (_hasSmartCandidate && Contains(_smartCandidate, _lastPhysical))
+                    BeginSmartPendingClick();
+                else
+                    BeginCreate();
                 e.Handled = true;
                 return;
             }
@@ -553,6 +643,7 @@ namespace FreePin.UI
         private void BeginCreate()
         {
             CancelPending();
+            ClearSmartCandidate();
             _creating = true;
             _selection = new DrawingRectangle();
             _dragStartLogical = _lastLogical;
@@ -564,6 +655,17 @@ namespace FreePin.UI
             RaiseSelectionChanged();
             InvalidateVisual();
         }
+
+        private void BeginSmartPendingClick()
+        {
+            _smartPendingClick = true;
+            _smartDownPhysical = _lastPhysical;
+            _dragStartPhysical = _lastPhysical;
+            CaptureMouse();
+            Cursor = Cursors.Hand;
+            InvalidateVisual();
+        }
+
 
         private void BeginResize(SelectionHandle handle)
         {
@@ -815,6 +917,33 @@ namespace FreePin.UI
             _lastLogical = ToLogical(physical);
             _lastPhysical = physical;
 
+            if (_smartPendingClick)
+            {
+                double dx = physical.X - _smartDownPhysical.X;
+                double dy = physical.Y - _smartDownPhysical.Y;
+                if (Math.Abs(dx) < SmartDragThreshold && Math.Abs(dy) < SmartDragThreshold)
+                {
+                    CursorMoved?.Invoke(this, EventArgs.Empty);
+                    InvalidateVisual();
+                    return;
+                }
+
+                _smartPendingClick = false;
+                _hasSmartCandidate = false;
+                _smartCandidate = new DrawingRectangle();
+                _creating = true;
+                _selection = new DrawingRectangle();
+                _dragStartPhysical = _smartDownPhysical;
+                _dragStartLogical = ToLogical(_smartDownPhysical);
+                _clearOnCreate = true;
+                _selected = null;
+                Cursor = Cursors.Cross;
+                UpdateCreatingSelection();
+                CursorMoved?.Invoke(this, EventArgs.Empty);
+                InvalidateVisual();
+                return;
+            }
+
             if (_creating)
             {
                 UpdateCreatingSelection();
@@ -889,6 +1018,22 @@ namespace FreePin.UI
         protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
         {
             base.OnMouseLeftButtonUp(e);
+            if (_smartPendingClick)
+            {
+                _smartPendingClick = false;
+                ReleaseMouseCapture();
+                if (_hasSmartCandidate)
+                {
+                    _selection = _smartCandidate;
+                    _hasSmartCandidate = false;
+                    _smartCandidate = new DrawingRectangle();
+                    RaiseSelectionChanged();
+                }
+                UpdateCursor();
+                InvalidateVisual();
+                e.Handled = true;
+                return;
+            }
             if (_creating)
             {
                 UpdateCreatingSelection();
@@ -1024,9 +1169,21 @@ namespace FreePin.UI
                 Cursor = Cursors.IBeam;
                 return;
             }
-            if (_tool == CaptureTool.Eyedropper || _creating || !HasSelection)
+            if (_smartPendingClick)
+            {
+                Cursor = Cursors.Hand;
+                return;
+            }
+            if (_tool == CaptureTool.Eyedropper || _creating)
             {
                 Cursor = Cursors.Cross;
+                return;
+            }
+            if (!HasSelection)
+            {
+                Cursor = _hasSmartCandidate && Contains(_smartCandidate, _lastPhysical)
+                    ? Cursors.Hand
+                    : Cursors.Cross;
                 return;
             }
             if (_resizing)
@@ -1079,6 +1236,12 @@ namespace FreePin.UI
         private static Rect PhysicalRect(DrawingRectangle r)
         {
             return new Rect(r.X, r.Y, r.Width, r.Height);
+        }
+
+        private static bool Contains(DrawingRectangle rect, Point point)
+        {
+            return point.X >= rect.Left && point.X <= rect.Right &&
+                   point.Y >= rect.Top && point.Y <= rect.Bottom;
         }
 
         private Point ClampPhysical(Point point)
