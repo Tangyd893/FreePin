@@ -23,6 +23,7 @@ namespace FreePin.UI
         private readonly TextBox _maxCount;
         private readonly TextBox _path;
         private readonly CheckBox _cacheEnabled;
+        private readonly CheckBox _rememberCaptureStyle;
         private HotkeyAction? _captureAction;
 
         public SettingsWindow(AppSettings draft, Func<AppSettings, string> save)
@@ -58,6 +59,21 @@ namespace FreePin.UI
             var subtitle = UiTheme.Text("所有设置保存在本机，不上传任何数据。", 12, UiTheme.Muted);
             subtitle.Margin = new Thickness(0, 3, 0, 16);
             content.Children.Add(subtitle);
+
+            content.Children.Add(SectionTitle("截图标注"));
+            _rememberCaptureStyle = new CheckBox
+            {
+                Content = "记住上次使用的颜色和笔触大小",
+                IsChecked = _draft.RememberCaptureStyle,
+                Foreground = UiTheme.Brush(UiTheme.Foreground),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            content.Children.Add(_rememberCaptureStyle);
+            var styleHint = UiTheme.Text("关闭后每次截图恢复默认颜色和 3 px 笔触；开启后沿用上一次截图设置。",
+                12, UiTheme.Muted);
+            styleHint.TextWrapping = TextWrapping.Wrap;
+            styleHint.Margin = new Thickness(0, 0, 0, 14);
+            content.Children.Add(styleHint);
 
             content.Children.Add(SectionTitle("截图缓存"));
             var cachePanel = new StackPanel();
@@ -307,6 +323,7 @@ namespace FreePin.UI
             _draft.CacheRetentionDays = days;
             _draft.CacheMaxCount = maxCount;
             _draft.CachePath = path;
+            _draft.RememberCaptureStyle = _rememberCaptureStyle.IsChecked == true;
 
             foreach (var pair in _hotkeyChecks)
                 HotkeyManager.GetBinding(_draft, pair.Key).Enabled = pair.Value.IsChecked == true;

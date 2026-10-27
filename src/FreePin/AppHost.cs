@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using FreePin.Imaging;
 using FreePin.Models;
+using FreePin.Native;
 using FreePin.Services;
 using FreePin.UI;
 using Hardcodet.Wpf.TaskbarNotification;
@@ -59,6 +62,8 @@ namespace FreePin
                 }
 
                 _cache.Cleanup();
+                NativeMethods.HideUtilityWindowsFromTaskSwitcher(
+                    System.Diagnostics.Process.GetCurrentProcess().Id);
                 Log.Info("FreePin 已启动，OCR: " + (_ocr.IsAvailable ? _ocr.LanguageName : "不可用"));
             }
             catch (Exception ex)
@@ -85,6 +90,7 @@ namespace FreePin
                 ResizeMode = ResizeMode.NoResize
             };
             _messageWindow.Show();
+            NativeMethods.MarkToolWindow(new WindowInteropHelper(_messageWindow).Handle);
         }
 
         private void CreateTray()
@@ -172,15 +178,49 @@ namespace FreePin
             try
             {
                 ScreenFrame frame = ScreenCapture.CaptureVirtualScreen();
-                _overlay = new CaptureOverlayWindow(frame, frame.Scale, OnCaptureResult);
-                _overlay.Closed += (s, e) => _overlay = null;
-                _overlay.Show();
-                _overlay.Activate();
+                var style = CreateInitialCaptureStyle();
+                var overlay = new CaptureOverlayWindow(frame, frame.Scale, OnCaptureResult, style);
+                _overlay = overlay;
+                overlay.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_overlay, overlay))
+                        _overlay = null;
+                    SaveCaptureStyle(overlay.CurrentStyle);
+                };
+                overlay.Show();
+                overlay.Activate();
             }
             catch (Exception ex)
             {
                 Log.Error("启动截图失败", ex);
                 Notify("截图失败", ex.Message);
+            }
+        }
+
+        private CaptureStyle CreateInitialCaptureStyle()
+        {
+            var style = new CaptureStyle();
+            if (_settings.RememberCaptureStyle)
+            {
+                style.Color = CaptureStyle.ParseColor(_settings.CaptureColor, style.Color);
+                style.Thickness = _settings.CaptureThickness;
+            }
+            return style;
+        }
+
+        private void SaveCaptureStyle(CaptureStyle style)
+        {
+            if (!_settings.RememberCaptureStyle || style == null)
+                return;
+            _settings.CaptureColor = CaptureStyle.ToHex(style.Color);
+            _settings.CaptureThickness = style.Thickness;
+            try
+            {
+                _settingsService.Save(_settings);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("保存截图样式失败: " + ex.Message);
             }
         }
 

@@ -11,6 +11,10 @@ namespace FreePin.Models
         public int CacheMaxCount { get; set; } = 100;
         public string CachePath { get; set; } = string.Empty;
 
+        public bool RememberCaptureStyle { get; set; } = true;
+        public string CaptureColor { get; set; } = "#B44E32";
+        public double CaptureThickness { get; set; } = 3;
+
         public HotkeyBinding ScreenshotHotkey { get; set; } = HotkeyBinding.DefaultScreenshot();
         public HotkeyBinding PinHotkey { get; set; } = HotkeyBinding.DefaultPin();
         public HotkeyBinding CacheHotkey { get; set; } = HotkeyBinding.DefaultCache();
@@ -29,6 +33,14 @@ namespace FreePin.Models
                 CacheMaxCount = 1000;
             if (string.IsNullOrWhiteSpace(CachePath))
                 CachePath = SettingsService.DefaultCachePath;
+            if (string.IsNullOrWhiteSpace(CaptureColor))
+                CaptureColor = "#B44E32";
+            if (double.IsNaN(CaptureThickness) || double.IsInfinity(CaptureThickness))
+                CaptureThickness = 3;
+            if (CaptureThickness < 1)
+                CaptureThickness = 1;
+            if (CaptureThickness > 30)
+                CaptureThickness = 30;
             if (ScreenshotHotkey == null)
                 ScreenshotHotkey = HotkeyBinding.DefaultScreenshot();
             if (PinHotkey == null)
@@ -47,6 +59,9 @@ namespace FreePin.Models
                 CacheRetentionDays = CacheRetentionDays,
                 CacheMaxCount = CacheMaxCount,
                 CachePath = CachePath,
+                RememberCaptureStyle = RememberCaptureStyle,
+                CaptureColor = CaptureColor,
+                CaptureThickness = CaptureThickness,
                 ScreenshotHotkey = ScreenshotHotkey.Clone(),
                 PinHotkey = PinHotkey.Clone(),
                 CacheHotkey = CacheHotkey.Clone(),

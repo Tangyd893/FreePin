@@ -29,7 +29,7 @@ namespace FreePin.UI
         private readonly List<Annotation> _annotations = new List<Annotation>();
         private readonly Stack<List<Annotation>> _undo = new Stack<List<Annotation>>();
         private readonly Stack<List<Annotation>> _redo = new Stack<List<Annotation>>();
-        private readonly CaptureStyle _style = new CaptureStyle();
+        private readonly CaptureStyle _style;
 
         private DrawingRectangle _selection;
         private CaptureTool _tool = CaptureTool.Select;
@@ -54,10 +54,11 @@ namespace FreePin.UI
         private Point _dragStartPhysical;
         private DrawingRectangle _dragStartSelection;
 
-        public CaptureSurface(ScreenFrame frame, double scale)
+        public CaptureSurface(ScreenFrame frame, double scale, CaptureStyle style = null)
         {
             _frame = frame ?? throw new ArgumentNullException(nameof(frame));
             _scale = scale <= 0 ? 1 : scale;
+            _style = style ?? new CaptureStyle();
             Background = Brushes.Transparent;
             ClipToBounds = true;
             Focusable = true;
@@ -417,16 +418,6 @@ namespace FreePin.UI
                 DrawHint(dc, full);
             }
 
-            if (_creating || _resizing || _moving || _drawing)
-            {
-                var line = new Pen(new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)), 1)
-                {
-                    DashStyle = new DashStyle(new double[] { 4, 4 }, 0)
-                };
-                line.Freeze();
-                dc.DrawLine(line, new Point(_lastLogical.X, 0), new Point(_lastLogical.X, ActualHeight));
-                dc.DrawLine(line, new Point(0, _lastLogical.Y), new Point(ActualWidth, _lastLogical.Y));
-            }
         }
 
         private void DrawAnnotations(DrawingContext dc)
@@ -442,20 +433,6 @@ namespace FreePin.UI
             foreach (Annotation annotation in _annotations)
             {
                 annotation.Draw(dc, _frame.ImageSource);
-                if (annotation == _selected)
-                {
-                    var bounds = annotation.Bounds;
-                    if (!bounds.IsEmpty)
-                    {
-                        var pen = new Pen(new SolidColorBrush(Color.FromArgb(210, 180, 78, 50)), 1.5)
-                        {
-                            DashStyle = new DashStyle(new double[] { 4, 3 }, 0)
-                        };
-                        pen.Freeze();
-                        bounds.Inflate(4, 4);
-                        dc.DrawRectangle(null, pen, bounds);
-                    }
-                }
             }
 
             if (_preview != null)

@@ -4,8 +4,10 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using FreePin.Native;
 using System.Windows.Threading;
 using FreePin.Annotations;
 using FreePin.Imaging;
@@ -45,7 +47,10 @@ namespace FreePin.UI
         private bool _placing;
         private bool _finished;
 
-        public CaptureOverlayWindow(ScreenFrame frame, double dpiScale, Action<CaptureResult> completed)
+        public CaptureStyle CurrentStyle { get; }
+
+        public CaptureOverlayWindow(ScreenFrame frame, double dpiScale, Action<CaptureResult> completed,
+            CaptureStyle initialStyle = null)
         {
             _frame = frame ?? throw new ArgumentNullException(nameof(frame));
             _completed = completed;
@@ -66,7 +71,8 @@ namespace FreePin.UI
             Height = frame.Bounds.Height / _scale;
 
             var root = new Canvas { ClipToBounds = true, Background = Brushes.Transparent };
-            _surface = new CaptureSurface(frame, _scale);
+            _surface = new CaptureSurface(frame, _scale, initialStyle);
+            CurrentStyle = _surface.Style;
             _surface.Width = Width;
             _surface.Height = Height;
             _surface.SelectionChanged += (s, e) => UpdateChrome();
@@ -123,6 +129,13 @@ namespace FreePin.UI
                 Keyboard.Focus(_surface);
                 UpdateChrome();
             };
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            // Keep the tool-window overlay out of Alt+Tab and Task View.
+            NativeMethods.MarkToolWindow(new WindowInteropHelper(this).Handle);
         }
 
         private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -277,50 +290,46 @@ namespace FreePin.UI
         private void UpdateMagnifier()
         {
             if (_finished || !_surface.HasSelection || _surface.IsCreatingSelection ||
-                _surface.IsDrawingAnnotation || _surface.IsTextEditing)
+                _toolbarRect.IsEmpty)
             {
                 _magnifier.Hide();
                 return;
             }
 
-            if (!_surface.IsAdjustingSelection && _surface.Tool != CaptureTool.Eyedropper &&
-                _surface.Tool != CaptureTool.Select)
-            {
-                _magnifier.Hide();
-                return;
-            }
-
-            Point anchor = _surface.MagnifierAnchor;
-            _magnifier.Update(_frame, anchor);
+            // The sampler is part of the fixed toolbar chrome. Its position is
+            // anchored to the toolbar, not to the mouse, so it never wanders.
+            _magnifier.Update(_frame, _surface.MagnifierAnchor);
             if (_magnifier.Visibility != Visibility.Visible)
                 return;
 
             _magnifier.Measure(new Size(_magnifier.Width, _magnifier.Height));
             Size size = _magnifier.DesiredSize;
-            Rect selection = ToLogical(_surface.Selection);
-            Point pointer = ToLogical(anchor);
             double overlayWidth = ActualWidth > 0 ? ActualWidth : Width;
             double overlayHeight = ActualHeight > 0 ? ActualHeight : Height;
-            Rect placed = ComputeMagnifierRect(new Size(overlayWidth, overlayHeight), selection,
-                _toolbarRect, size, pointer);
+            Rect placed = ComputeMagnifierRect(new Size(overlayWidth, overlayHeight), _toolbarRect, size);
             Canvas.SetLeft(_magnifier, placed.X);
             Canvas.SetTop(_magnifier, placed.Y);
         }
 
-        private static Rect ComputeMagnifierRect(Size overlay, Rect selection, Rect toolbar,
-            Size magnifier, Point pointer, double gap = 10, double edge = 8)
+        private static Rect ComputeMagnifierRect(Size overlay, Rect toolbar, Size magnifier,
+            double gap = 8, double edge = 8)
         {
             var candidates = new[]
             {
-                new Rect(selection.Right + gap, pointer.Y - magnifier.Height / 2, magnifier.Width, magnifier.Height),
-                new Rect(selection.Left - gap - magnifier.Width, pointer.Y - magnifier.Height / 2, magnifier.Width, magnifier.Height),
-                new Rect(pointer.X - magnifier.Width / 2, selection.Top - gap - magnifier.Height, magnifier.Width, magnifier.Height),
-                new Rect(pointer.X - magnifier.Width / 2, selection.Bottom + gap, magnifier.Width, magnifier.Height)
+                new Rect(toolbar.Right + gap, toolbar.Top + (toolbar.Height - magnifier.Height) / 2,
+                    magnifier.Width, magnifier.Height),
+                new Rect(toolbar.Left - gap - magnifier.Width,
+                    toolbar.Top + (toolbar.Height - magnifier.Height) / 2,
+                    magnifier.Width, magnifier.Height),
+                new Rect(toolbar.Right - magnifier.Width, toolbar.Top - gap - magnifier.Height,
+                    magnifier.Width, magnifier.Height),
+                new Rect(toolbar.Right - magnifier.Width, toolbar.Bottom + gap,
+                    magnifier.Width, magnifier.Height)
             };
             foreach (Rect candidate in candidates)
             {
                 Rect clamped = ClampRect(candidate, overlay, edge);
-                if (toolbar.IsEmpty || !Intersects(clamped, toolbar))
+                if (!Intersects(clamped, toolbar))
                     return clamped;
             }
             return ClampRect(candidates[0], overlay, edge);
