@@ -54,6 +54,9 @@ namespace FreePin.Native
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
         [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
         public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
         [DllImport("user32.dll")]

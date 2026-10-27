@@ -77,6 +77,7 @@ namespace FreePin.UI
         public event EventHandler StyleChanged;
         public event EventHandler ToolChanged;
         public event EventHandler CursorMoved;
+        public event EventHandler SmartCandidateChanged;
 
         public DrawingRectangle Selection
         {
@@ -323,7 +324,7 @@ namespace FreePin.UI
             _smartCandidate = candidate;
             _hasSmartCandidate = true;
             UpdateCursor();
-            InvalidateVisual();
+            OnSmartCandidateChanged();
         }
 
         public void ClearSmartCandidate()
@@ -333,7 +334,14 @@ namespace FreePin.UI
             _hasSmartCandidate = false;
             _smartCandidate = new DrawingRectangle();
             UpdateCursor();
-            InvalidateVisual();
+            OnSmartCandidateChanged();
+        }
+
+        private void OnSmartCandidateChanged()
+        {
+            EventHandler handler = SmartCandidateChanged;
+            if (handler != null)
+                handler(this, EventArgs.Empty);
         }
 
         public void PickColor(Point physicalPoint)
@@ -486,25 +494,9 @@ namespace FreePin.UI
             }
             else
             {
-                if (_hasSmartCandidate)
-                    DrawSmartCandidate(dc);
                 DrawHint(dc, full);
             }
 
-        }
-
-        private void DrawSmartCandidate(DrawingContext dc)
-        {
-            Rect candidate = ToLogical(_smartCandidate);
-            if (candidate.Width < 2 || candidate.Height < 2)
-                return;
-
-            Color accent = UiTheme.Accent;
-            var fill = new SolidColorBrush(Color.FromArgb(20, accent.R, accent.G, accent.B));
-            fill.Freeze();
-            var pen = new Pen(new SolidColorBrush(accent), 1.6);
-            pen.Freeze();
-            dc.DrawRectangle(fill, pen, candidate);
         }
 
         private void DrawAnnotations(DrawingContext dc)
@@ -924,13 +916,11 @@ namespace FreePin.UI
                 if (Math.Abs(dx) < SmartDragThreshold && Math.Abs(dy) < SmartDragThreshold)
                 {
                     CursorMoved?.Invoke(this, EventArgs.Empty);
-                    InvalidateVisual();
                     return;
                 }
 
                 _smartPendingClick = false;
-                _hasSmartCandidate = false;
-                _smartCandidate = new DrawingRectangle();
+                ClearSmartCandidate();
                 _creating = true;
                 _selection = new DrawingRectangle();
                 _dragStartPhysical = _smartDownPhysical;
@@ -982,7 +972,9 @@ namespace FreePin.UI
             }
 
             CursorMoved?.Invoke(this, EventArgs.Empty);
-            InvalidateVisual();
+            // No unconditional invalidation: hover updates only the cursor and
+            // the separate smart-candidate chrome. The full-screen visual is
+            // repainted only when the selection/annotation actually changes.
         }
 
         private void UpdateCreatingSelection()

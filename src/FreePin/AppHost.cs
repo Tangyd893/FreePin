@@ -23,6 +23,10 @@ namespace FreePin
         private readonly Application _application;
         private readonly SettingsService _settingsService;
         private readonly OcrService _ocr;
+        private readonly SmartSelectionService _smartSelection;
+        private DispatcherTimer _smartWarmTimer;
+        private IntPtr _warmedForeground;
+        private DateTime _lastWarmUtc;
         private AppSettings _settings;
         private CacheService _cache;
         private Window _messageWindow;
@@ -44,6 +48,7 @@ namespace FreePin
             _settings = _settingsService.Load();
             _cache = new CacheService(_settings);
             _ocr = new OcrService();
+            _smartSelection = new SmartSelectionService();
         }
 
         public void Start()
@@ -64,6 +69,12 @@ namespace FreePin
                 _cache.Cleanup();
                 NativeMethods.HideUtilityWindowsFromTaskSwitcher(
                     System.Diagnostics.Process.GetCurrentProcess().Id);
+
+                _smartWarmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+                _smartWarmTimer.Tick += (s, e) => WarmSmartSelection();
+                _smartWarmTimer.Start();
+                WarmSmartSelection();
+
                 Log.Info("FreePin 已启动，OCR: " + (_ocr.IsAvailable ? _ocr.LanguageName : "不可用"));
             }
             catch (Exception ex)
@@ -165,6 +176,25 @@ namespace FreePin
             StartScreenshot();
         }
 
+        private void WarmSmartSelection()
+        {
+            if (_disposed || _overlay != null || !_settings.SmartSelectionEnabled)
+                return;
+
+            IntPtr foreground = NativeMethods.GetForegroundWindow();
+            if (foreground == IntPtr.Zero)
+                return;
+            if (foreground == _warmedForeground &&
+                DateTime.UtcNow - _lastWarmUtc < TimeSpan.FromSeconds(8))
+            {
+                return;
+            }
+
+            _warmedForeground = foreground;
+            _lastWarmUtc = DateTime.UtcNow;
+            _smartSelection.PrefetchWindow(foreground);
+        }
+
         private void StartScreenshot()
         {
             if (_disposed)
@@ -177,10 +207,14 @@ namespace FreePin
 
             try
             {
+                // Start warming the foreground window's accessibility tree
+                // while the screen bitmap is being captured.
+                if (_settings.SmartSelectionEnabled)
+                    _smartSelection.PrefetchForeground();
                 ScreenFrame frame = ScreenCapture.CaptureVirtualScreen();
                 var style = CreateInitialCaptureStyle();
                 var overlay = new CaptureOverlayWindow(frame, frame.Scale, OnCaptureResult, style,
-                    _settings.SmartSelectionEnabled);
+                    _settings.SmartSelectionEnabled, _smartSelection);
                 _overlay = overlay;
                 overlay.Closed += (s, e) =>
                 {
@@ -569,6 +603,29 @@ namespace FreePin
             catch (Exception ex)
             {
                 Log.Error("释放托盘失败", ex);
+            }
+
+            try
+            {
+                if (_smartWarmTimer != null)
+                {
+                    _smartWarmTimer.Stop();
+                    _smartWarmTimer = null;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            try
+            {
+                if (_smartSelection != null)
+                    _smartSelection.Dispose();
+            }
+            catch
+            {
+                // ignored
             }
 
             try

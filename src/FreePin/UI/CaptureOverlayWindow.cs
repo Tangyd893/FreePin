@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -42,21 +43,29 @@ namespace FreePin.UI
         private readonly double _scale;
         private readonly Action<CaptureResult> _completed;
         private readonly CaptureSurface _surface;
+        private readonly Border _smartBorder;
         private readonly CaptureToolbar _toolbar;
         private readonly PixelMagnifier _magnifier;
         private Rect _toolbarRect;
         private bool _placing;
         private bool _finished;
         private readonly bool _smartSelectionEnabled;
+        private readonly bool _ownsSmartSelection;
         private readonly SmartSelectionService _smartSelection;
         private readonly DispatcherTimer _smartTimer;
+        private readonly Stopwatch _smartClock = Stopwatch.StartNew();
+        private long _lastFastTimestamp;
+        private bool _smartDetecting;
+        private bool _smartPendingRefine;
+        private int _smartRetryCount;
         private Point _smartPointer;
         private int _smartRequest;
 
         public CaptureStyle CurrentStyle { get; }
 
         public CaptureOverlayWindow(ScreenFrame frame, double dpiScale, Action<CaptureResult> completed,
-            CaptureStyle initialStyle = null, bool smartSelectionEnabled = true)
+            CaptureStyle initialStyle = null, bool smartSelectionEnabled = true,
+            SmartSelectionService sharedSmartSelection = null)
         {
             _frame = frame ?? throw new ArgumentNullException(nameof(frame));
             _completed = completed;
@@ -85,8 +94,9 @@ namespace FreePin.UI
             _smartSelectionEnabled = smartSelectionEnabled;
             if (_smartSelectionEnabled)
             {
-                _smartSelection = new SmartSelectionService();
-                _smartTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+                _ownsSmartSelection = sharedSmartSelection == null;
+                _smartSelection = sharedSmartSelection ?? new SmartSelectionService();
+                _smartTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(35) };
                 _smartTimer.Tick += (s, e) => RequestSmartDetection();
             }
 
@@ -108,7 +118,20 @@ namespace FreePin.UI
                 UpdateMagnifier();
             };
             _surface.CursorMoved += OnSurfaceCursorMoved;
+            _surface.SmartCandidateChanged += (s, e) => UpdateSmartBorder();
             root.Children.Add(_surface);
+
+            Color accent = UiTheme.Accent;
+            _smartBorder = new Border
+            {
+                BorderBrush = new SolidColorBrush(accent),
+                BorderThickness = new Thickness(1.8),
+                Background = new SolidColorBrush(Color.FromArgb(18, accent.R, accent.G, accent.B)),
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+                SnapsToDevicePixels = true
+            };
+            root.Children.Add(_smartBorder);
 
             _magnifier = new PixelMagnifier();
             root.Children.Add(_magnifier);
@@ -136,7 +159,7 @@ namespace FreePin.UI
             Closed += (s, e) =>
             {
                 CancelSmartDetection();
-                if (_smartSelection != null)
+                if (_ownsSmartSelection && _smartSelection != null)
                     _smartSelection.Dispose();
                 _frame.Dispose();
                 if (!_finished)
@@ -150,6 +173,7 @@ namespace FreePin.UI
                 _surface.Focus();
                 Keyboard.Focus(_surface);
                 UpdateChrome();
+                UpdateFastCandidate(GetCursorScreen());
                 OnSurfaceCursorMoved(s, e);
             };
         }
@@ -231,7 +255,35 @@ namespace FreePin.UI
                 SchedulePlaceToolbar();
             }
             UpdateHistory();
+            UpdateSmartBorder();
             UpdateMagnifier();
+        }
+
+        private void UpdateSmartBorder()
+        {
+            if (_smartBorder == null)
+                return;
+
+            if (!_smartSelectionEnabled || _finished ||
+                _surface.HasSelection || _surface.IsCreatingSelection ||
+                !_surface.HasSmartCandidate)
+            {
+                _smartBorder.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            Rect candidate = ToLogical(_surface.SmartCandidate);
+            if (candidate.Width < 2 || candidate.Height < 2)
+            {
+                _smartBorder.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            Canvas.SetLeft(_smartBorder, Math.Round(candidate.X));
+            Canvas.SetTop(_smartBorder, Math.Round(candidate.Y));
+            _smartBorder.Width = Math.Max(2, Math.Round(candidate.Width));
+            _smartBorder.Height = Math.Max(2, Math.Round(candidate.Height));
+            _smartBorder.Visibility = Visibility.Visible;
         }
 
         private void UpdateHistory()
@@ -321,20 +373,69 @@ namespace FreePin.UI
                 return;
             }
 
+            Point previousPointer = _smartPointer;
             _smartPointer = GetCursorScreen();
-            if (_smartTimer == null)
+            if (_smartPointer != previousPointer)
+                _smartRetryCount = 0;
+            long now = _smartClock.ElapsedMilliseconds;
+            if (now - _lastFastTimestamp >= 14)
             {
-                RequestSmartDetection();
+                _lastFastTimestamp = now;
+                UpdateFastCandidate(_smartPointer);
+            }
+
+            if (_smartTimer == null)
+                return;
+
+            // Do not reset the timer on every mouse move: that was the source of
+            // the "not following the cursor" feeling. Refinement runs at most a
+            // few times per second, while the fast window/control preview above
+            // updates on every rendered frame.
+            _smartPendingRefine = true;
+            if (!_smartDetecting && !_smartTimer.IsEnabled)
+                _smartTimer.Start();
+        }
+
+        private void UpdateFastCandidate(Point pointer)
+        {
+            if (_smartSelection == null || _finished || _surface.HasSelection ||
+                _surface.IsCreatingSelection)
+            {
                 return;
             }
-            _smartTimer.Stop();
-            _smartTimer.Start();
+
+            var smartPoint = new SmartPoint(pointer.X, pointer.Y);
+            SmartSelectionCandidate window = _smartSelection.FindWindow(smartPoint);
+            if (window == null)
+            {
+                _surface.ClearSmartCandidate();
+                return;
+            }
+
+            SetSmartCandidateLocal(window);
+            SmartSelectionCandidate cached = _smartSelection.FindCachedControl(window, smartPoint);
+            if (cached != null)
+                SetSmartCandidateLocal(cached);
+        }
+
+        private void SetSmartCandidateLocal(SmartSelectionCandidate candidate)
+        {
+            if (candidate == null)
+                return;
+            DrawingRectangle bounds = candidate.Bounds;
+            _surface.SetSmartCandidate(new DrawingRectangle(
+                bounds.X - _frame.Bounds.Left,
+                bounds.Y - _frame.Bounds.Top,
+                bounds.Width,
+                bounds.Height));
         }
 
         private void CancelSmartDetection()
         {
             if (_smartTimer != null)
                 _smartTimer.Stop();
+            _smartPendingRefine = false;
+            _smartRetryCount = 0;
             _smartRequest++;
         }
 
@@ -347,14 +448,22 @@ namespace FreePin.UI
             {
                 return;
             }
+            if (_smartDetecting)
+            {
+                _smartPendingRefine = true;
+                return;
+            }
 
             int request = ++_smartRequest;
+            _smartDetecting = true;
+            _smartPendingRefine = false;
             Point pointer = _smartPointer;
             _ = DetectSmartAsync(pointer, request);
         }
 
         private async Task DetectSmartAsync(Point pointer, int request)
         {
+            bool foundControl = false;
             try
             {
                 SmartSelectionCandidate candidate = await _smartSelection.DetectAsync(pointer.X, pointer.Y);
@@ -370,16 +479,29 @@ namespace FreePin.UI
                     return;
                 }
 
-                DrawingRectangle bounds = candidate.Bounds;
-                _surface.SetSmartCandidate(new DrawingRectangle(
-                    bounds.X - _frame.Bounds.Left,
-                    bounds.Y - _frame.Bounds.Top,
-                    bounds.Width,
-                    bounds.Height));
+                foundControl = candidate.Kind == SmartCandidateKind.Control;
+                SetSmartCandidateLocal(candidate);
             }
             catch (Exception ex)
             {
                 Log.Warn("智能选区检测失败: " + ex.Message);
+            }
+            finally
+            {
+                _smartDetecting = false;
+                bool retry = !foundControl && _smartRetryCount < 2 &&
+                    !_finished && request == _smartRequest &&
+                    _smartSelectionEnabled && !_surface.HasSelection &&
+                    !_surface.IsCreatingSelection && !_surface.IsSmartPendingClick;
+                if (retry)
+                    _smartRetryCount++;
+                if ((_smartPendingRefine || retry) && _smartTimer != null &&
+                    !_finished && request == _smartRequest && _smartSelectionEnabled &&
+                    !_surface.HasSelection && !_surface.IsCreatingSelection &&
+                    !_surface.IsSmartPendingClick)
+                {
+                    _smartTimer.Start();
+                }
             }
         }
 

@@ -52,7 +52,7 @@ namespace FreePin.Services
     /// </summary>
     public sealed class SmartSelectionService : IDisposable
     {
-        private const int CacheMilliseconds = 750;
+        private const int CacheMilliseconds = 10000;
         private const int MaxUiaElements = 5000;
 
         private readonly int _ownProcessId;
@@ -60,6 +60,7 @@ namespace FreePin.Services
             new BlockingCollection<ControlRequest>(new ConcurrentQueue<ControlRequest>(), 4);
         private readonly Dictionary<IntPtr, ControlCache> _controlCache =
             new Dictionary<IntPtr, ControlCache>();
+        private readonly object _cacheLock = new object();
         private readonly Thread _worker;
         private volatile bool _disposed;
 
@@ -98,7 +99,14 @@ namespace FreePin.Services
                         return true;
                     if (!NativeMethods.IsWindowVisible(hWnd) || NativeMethods.IsIconic(hWnd))
                         return true;
-                    if (NativeMethods.IsWindowCloaked(hWnd))
+
+                    // Cheap rectangle rejection before DWM / class-name calls.
+                    NativeMethods.RECT rect;
+                    if (!NativeMethods.GetWindowRect(hWnd, out rect))
+                        return true;
+                    if (rect.Right - rect.Left < 2 || rect.Bottom - rect.Top < 2)
+                        return true;
+                    if (!Contains(rect, point))
                         return true;
 
                     long exStyle = NativeMethods.GetWindowLong(hWnd, NativeMethods.GwlExStyle);
@@ -108,15 +116,15 @@ namespace FreePin.Services
                     string className = NativeMethods.GetWindowClassName(hWnd);
                     if (className == "Progman" || className == "WorkerW")
                         return true;
+                    if (NativeMethods.IsWindowCloaked(hWnd))
+                        return true;
 
-                    NativeMethods.RECT rect;
-                    if (!NativeMethods.TryGetExtendedFrameBounds(hWnd, out rect) &&
-                        !NativeMethods.GetWindowRect(hWnd, out rect))
-                        return true;
-                    if (rect.Right - rect.Left < 2 || rect.Bottom - rect.Top < 2)
-                        return true;
-                    if (!Contains(rect, point))
-                        return true;
+                    NativeMethods.RECT extended;
+                    if (NativeMethods.TryGetExtendedFrameBounds(hWnd, out extended) &&
+                        extended.Right - extended.Left >= 2 && extended.Bottom - extended.Top >= 2)
+                    {
+                        rect = extended;
+                    }
 
                     result = new SmartSelectionCandidate
                     {
@@ -134,6 +142,116 @@ namespace FreePin.Services
                 return null;
             }
             return result;
+        }
+
+        /// <summary>
+        /// Returns a control candidate immediately when the accessibility tree for
+        /// this window is already cached. This keeps ordinary mouse movement at
+        /// pointer speed; uncached windows fall back to the window candidate and
+        /// are refined asynchronously.
+        /// </summary>
+        public SmartSelectionCandidate FindCachedControl(
+            SmartSelectionCandidate window, SmartPoint point)
+        {
+            if (_disposed || window == null || window.IsEmpty)
+                return null;
+
+            ControlCache cached;
+            lock (_cacheLock)
+            {
+                if (!_controlCache.TryGetValue(window.Hwnd, out cached) ||
+                    cached == null ||
+                    DateTime.UtcNow > cached.Expires ||
+                    cached.WindowBounds != window.Bounds)
+                {
+                    return null;
+                }
+            }
+
+            ControlCandidate best = null;
+            double bestArea = double.MaxValue;
+            foreach (ControlCandidate candidate in cached.Controls)
+            {
+                if (!candidate.Contains(point))
+                    continue;
+                if (candidate.Area >= bestArea)
+                    continue;
+                best = candidate;
+                bestArea = candidate.Area;
+            }
+            if (best == null)
+                return null;
+
+            return new SmartSelectionCandidate
+            {
+                Hwnd = window.Hwnd,
+                Bounds = best.Bounds,
+                Name = best.Name,
+                Kind = SmartCandidateKind.Control
+            };
+        }
+
+        public void PrefetchForeground()
+        {
+            if (_disposed)
+                return;
+            PrefetchWindow(NativeMethods.GetForegroundWindow());
+        }
+
+        /// <summary>
+        /// Warms the accessibility cache for a window while FreePin is idle.
+        /// The overlay can then move its highlight at pointer speed without
+        /// waiting for the first UIA query.
+        /// </summary>
+        public void PrefetchWindow(IntPtr hWnd)
+        {
+            if (_disposed || hWnd == IntPtr.Zero)
+                return;
+
+            uint processId;
+            NativeMethods.GetWindowThreadProcessId(hWnd, out processId);
+            if (processId == (uint)_ownProcessId ||
+                !NativeMethods.IsWindowVisible(hWnd) ||
+                NativeMethods.IsIconic(hWnd))
+            {
+                return;
+            }
+
+            NativeMethods.RECT rect;
+            if (!NativeMethods.GetWindowRect(hWnd, out rect))
+                return;
+            if (rect.Right - rect.Left < 2 || rect.Bottom - rect.Top < 2)
+                return;
+
+            NativeMethods.RECT extended;
+            if (NativeMethods.TryGetExtendedFrameBounds(hWnd, out extended) &&
+                extended.Right - extended.Left >= 2 &&
+                extended.Bottom - extended.Top >= 2)
+            {
+                rect = extended;
+            }
+
+            var window = new SmartSelectionCandidate
+            {
+                Hwnd = hWnd,
+                Bounds = new DrawingRectangle(rect.Left, rect.Top,
+                    rect.Right - rect.Left, rect.Bottom - rect.Top),
+                Name = NativeMethods.GetWindowTitle(hWnd) ?? "窗口",
+                Kind = SmartCandidateKind.Window
+            };
+            if (window.IsEmpty)
+                return;
+
+            var completion = new TaskCompletionSource<SmartSelectionCandidate>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var point = new SmartPoint(
+                window.Bounds.Left + window.Bounds.Width / 2.0,
+                window.Bounds.Top + window.Bounds.Height / 2.0);
+            if (!_requests.TryAdd(new ControlRequest(
+                window, point, completion, CancellationToken.None)))
+            {
+                return;
+            }
         }
 
         /// <summary>
@@ -233,12 +351,17 @@ namespace FreePin.Services
 
         private List<ControlCandidate> GetControls(SmartSelectionCandidate window)
         {
-            ControlCache cached;
-            if (_controlCache.TryGetValue(window.Hwnd, out cached) &&
-                DateTime.UtcNow <= cached.Expires &&
-                cached.WindowBounds == window.Bounds)
+            Stopwatch elapsed = Stopwatch.StartNew();
+            lock (_cacheLock)
             {
-                return cached.Controls;
+                ControlCache cached;
+                if (_controlCache.TryGetValue(window.Hwnd, out cached) &&
+                    cached != null &&
+                    DateTime.UtcNow <= cached.Expires &&
+                    cached.WindowBounds == window.Bounds)
+                {
+                    return cached.Controls;
+                }
             }
 
             var controls = new List<ControlCandidate>();
@@ -248,7 +371,7 @@ namespace FreePin.Services
                 if (root != null)
                 {
                     AutomationElementCollection descendants = root.FindAll(
-                        TreeScope.Descendants, Condition.TrueCondition);
+                        TreeScope.Descendants, Automation.ControlViewCondition);
                     int count = Math.Min(descendants.Count, MaxUiaElements);
                     double windowArea = Math.Max(1, window.Bounds.Width * window.Bounds.Height);
                     for (int i = 0; i < count; i++)
@@ -256,9 +379,10 @@ namespace FreePin.Services
                         AutomationElement element = descendants[i];
                         try
                         {
-                            if (element.Current.IsOffscreen)
-                                continue;
-
+                            // Bounds alone are enough for Phase 1. Reading Name /
+                            // AutomationId / IsOffscreen for every node costs
+                            // several cross-process UIA calls per element and was
+                            // the main source of hover latency.
                             System.Windows.Rect rect = element.Current.BoundingRectangle;
                             if (rect.Width < 8 || rect.Height < 8)
                                 continue;
@@ -278,16 +402,10 @@ namespace FreePin.Services
                             if (area >= windowArea * 0.9)
                                 continue;
 
-                            string name = element.Current.Name;
-                            if (string.IsNullOrWhiteSpace(name))
-                                name = element.Current.AutomationId;
-                            if (string.IsNullOrWhiteSpace(name))
-                                name = element.Current.ClassName;
-
                             controls.Add(new ControlCandidate
                             {
                                 Bounds = bounds,
-                                Name = name ?? string.Empty,
+                                Name = string.Empty,
                                 Area = area
                             });
                         }
@@ -303,12 +421,17 @@ namespace FreePin.Services
                 // No accessibility tree; the window candidate remains usable.
             }
 
-            _controlCache[window.Hwnd] = new ControlCache
+            lock (_cacheLock)
             {
-                WindowBounds = window.Bounds,
-                Controls = controls,
-                Expires = DateTime.UtcNow.AddMilliseconds(CacheMilliseconds)
-            };
+                _controlCache[window.Hwnd] = new ControlCache
+                {
+                    WindowBounds = window.Bounds,
+                    Controls = controls,
+                    Expires = DateTime.UtcNow.AddMilliseconds(CacheMilliseconds)
+                };
+            }
+            Log.Info(string.Format("智能选区缓存：{0} 个控件，{1} ms",
+                controls.Count, elapsed.ElapsedMilliseconds));
             return controls;
         }
 
