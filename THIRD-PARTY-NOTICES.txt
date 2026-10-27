@@ -1,0 +1,22 @@
+FreePin third-party notices
+===========================
+
+Hardcodet.NotifyIcon.Wpf 1.1.0
+-----------------------------
+Copyright (c) Philipp Sumi / Hardcodet Consulting.
+Licensed under the Code Project Open License (CPOL) 1.02.
+Project: https://github.com/hardcodet/wpf-notifyicon
+
+Newtonsoft.Json 13.0.3
+----------------------
+Copyright (c) James Newton-King.
+Licensed under the MIT License.
+Project: https://github.com/JamesNK/Newtonsoft.Json
+
+Microsoft.NETFramework.ReferenceAssemblies.net48 1.0.3
+--------------------------------------------------------
+Build-time reference assemblies from Microsoft, licensed under the MIT License.
+
+Windows SDK / Windows.Media.Ocr
+-------------------------------
+Used through the Windows operating system APIs; not redistributed with FreePin.

@@ -1,0 +1,13 @@
+# Build output
+dist/
+src/**/bin/
+src/**/obj/
+tools/
+tests/
+
+# Local/build noise
+.vs/
+*.user
+*.suo
+*.log
+*.nupkg
