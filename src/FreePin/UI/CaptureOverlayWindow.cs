@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using FreePin.Annotations;
 using FreePin.Imaging;
 using FreePin.Services;
 using DrawingBitmap = System.Drawing.Bitmap;
@@ -14,12 +17,12 @@ namespace FreePin.UI
 {
     public enum CaptureAction
     {
-        Edit,
         Copy,
         Pin,
         Save,
         Ocr,
-        LongCapture
+        LongCapture,
+        Cancel
     }
 
     public sealed class CaptureResult
@@ -36,8 +39,10 @@ namespace FreePin.UI
         private readonly double _scale;
         private readonly Action<CaptureResult> _completed;
         private readonly CaptureSurface _surface;
-        private readonly Border _toolbar;
-        private readonly TextBlock _size;
+        private readonly CaptureToolbar _toolbar;
+        private readonly PixelMagnifier _magnifier;
+        private Rect _toolbarRect;
+        private bool _placing;
         private bool _finished;
 
         public CaptureOverlayWindow(ScreenFrame frame, double dpiScale, Action<CaptureResult> completed)
@@ -60,36 +65,45 @@ namespace FreePin.UI
             Width = frame.Bounds.Width / _scale;
             Height = frame.Bounds.Height / _scale;
 
-            var root = new Grid { ClipToBounds = true };
+            var root = new Canvas { ClipToBounds = true, Background = Brushes.Transparent };
             _surface = new CaptureSurface(frame, _scale);
-            _surface.SelectionChanged += (s, e) => UpdateToolbar();
+            _surface.Width = Width;
+            _surface.Height = Height;
+            _surface.SelectionChanged += (s, e) => UpdateChrome();
+            _surface.AnnotationsChanged += (s, e) => UpdateHistory();
+            _surface.StyleChanged += (s, e) =>
+            {
+                _toolbar.SetStyle();
+                UpdateMagnifier();
+            };
+            _surface.ToolChanged += (s, e) =>
+            {
+                _toolbar.SetTool(_surface.Tool, false);
+                UpdateCursorForToolbar();
+                UpdateMagnifier();
+            };
+            _surface.CursorMoved += (s, e) => UpdateMagnifier();
             root.Children.Add(_surface);
 
-            _toolbar = new Border
-            {
-                Background = UiTheme.Brush(UiTheme.Panel),
-                BorderBrush = UiTheme.Brush(UiTheme.Border),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(10, 7, 10, 7),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0),
-                Visibility = Visibility.Collapsed
-            };
+            _magnifier = new PixelMagnifier();
+            root.Children.Add(_magnifier);
 
-            var content = new StackPanel { Orientation = Orientation.Horizontal };
-            _size = UiTheme.Text(string.Empty, 12, UiTheme.Muted);
-            _size.Margin = new Thickness(0, 0, 12, 0);
-            content.Children.Add(_size);
-            content.Children.Add(UiTheme.Button("编辑", "进入标注编辑器", (s, e) => Finish(CaptureAction.Edit)));
-            content.Children.Add(UiTheme.Button("复制", "复制到剪贴板 (Enter)", (s, e) => Finish(CaptureAction.Copy), true));
-            content.Children.Add(UiTheme.Button("贴图", "把选区贴到桌面最上层", (s, e) => Finish(CaptureAction.Pin)));
-            content.Children.Add(UiTheme.Button("保存", "另存为 PNG", (s, e) => Finish(CaptureAction.Save)));
-            content.Children.Add(UiTheme.Button("长截图", "滚动页面拼接成长截图", (s, e) => Finish(CaptureAction.LongCapture)));
-            content.Children.Add(UiTheme.Button("识别文字", "识别选区文字", (s, e) => Finish(CaptureAction.Ocr)));
-            content.Children.Add(UiTheme.Button("取消", "取消截图 (Esc)", (s, e) => Cancel()));
-            _toolbar.Child = content;
+            _toolbar = new CaptureToolbar(_surface.Style);
+            _toolbar.ToolChanged += tool => _surface.Tool = tool;
+            _toolbar.ColorChanged += color => _surface.SetColor(color);
+            _toolbar.ThicknessChanged += value => _surface.SetThickness(value);
+            _toolbar.FontSizeChanged += value => _surface.SetFontSize(value);
+            _toolbar.RoundedChanged += value => _surface.SetRoundedRectangle(value);
+            _toolbar.UndoRequested += () => _surface.Undo();
+            _toolbar.RedoRequested += () => _surface.Redo();
+            _toolbar.ActionRequested += action =>
+            {
+                if (action == CaptureAction.Cancel)
+                    Cancel();
+                else
+                    Finish(action);
+            };
+            _toolbar.Visibility = Visibility.Collapsed;
             root.Children.Add(_toolbar);
 
             Content = root;
@@ -99,7 +113,7 @@ namespace FreePin.UI
                 _frame.Dispose();
                 if (!_finished)
                 {
-                    // Dialog closed without a result; nothing else to do.
+                    // Nothing to hand over; the overlay was cancelled.
                 }
             };
             Loaded += (s, e) =>
@@ -107,25 +121,103 @@ namespace FreePin.UI
                 Activate();
                 _surface.Focus();
                 Keyboard.Focus(_surface);
-                PlaceToolbar();
+                UpdateChrome();
             };
         }
 
-        private void UpdateToolbar()
+        private void OnPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            DrawingRectangle selection = _surface.Selection;
-            bool hasSelection = selection.Width >= 2 && selection.Height >= 2 && !_surface.IsDragging;
+            if (_finished || _surface.IsTextEditing)
+                return;
+
+            if (e.Key == Key.Escape)
+            {
+                if (!_surface.CancelPending())
+                    Cancel();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Enter || (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) != 0))
+            {
+                if (_surface.HasSelection)
+                    Finish(CaptureAction.Copy);
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            {
+                if (_surface.HasSelection)
+                    Finish(CaptureAction.Save);
+                e.Handled = true;
+                return;
+            }
+
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift)) == 0)
+            {
+                CaptureTool? tool = ToolForKey(e.Key);
+                if (tool.HasValue)
+                {
+                    _toolbar.SetTool(tool.Value);
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            if (_surface.HandleKey(e.Key, Keyboard.Modifiers))
+            {
+                e.Handled = true;
+            }
+        }
+
+        private static CaptureTool? ToolForKey(Key key)
+        {
+            switch (key)
+            {
+                case Key.V: return CaptureTool.Select;
+                case Key.P: return CaptureTool.Pen;
+                case Key.L: return CaptureTool.Line;
+                case Key.A: return CaptureTool.Arrow;
+                case Key.R: return CaptureTool.Rectangle;
+                case Key.T: return CaptureTool.Text;
+                case Key.I: return CaptureTool.Eyedropper;
+                default: return null;
+            }
+        }
+
+        private void UpdateChrome()
+        {
+            bool hasSelection = _surface.HasSelection && !_surface.IsCreatingSelection;
             _toolbar.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
             if (hasSelection)
             {
-                _size.Text = selection.Width + " × " + selection.Height + "  ";
+                DrawingRectangle selection = _surface.Selection;
+                _toolbar.SetSelectionSize(selection.Width, selection.Height);
                 SchedulePlaceToolbar();
             }
+            UpdateHistory();
+            UpdateMagnifier();
+        }
+
+        private void UpdateHistory()
+        {
+            _toolbar.SetHistory(_surface.CanUndo, _surface.CanRedo);
+        }
+
+        private void UpdateCursorForToolbar()
+        {
+            _surface.Focus();
         }
 
         private void SchedulePlaceToolbar()
         {
-            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PlaceToolbar));
+            if (_placing)
+                return;
+            _placing = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                _placing = false;
+                PlaceToolbar();
+            }));
         }
 
         private void PlaceToolbar()
@@ -146,15 +238,11 @@ namespace FreePin.UI
             if (toolbarSize.Width <= 0 || toolbarSize.Height <= 0)
                 return;
 
-            DrawingRectangle selection = _surface.Selection;
-            var selectionRect = new Rect(
-                selection.X / _scale,
-                selection.Y / _scale,
-                selection.Width / _scale,
-                selection.Height / _scale);
-            Rect placed = ComputeToolbarRect(
-                new Size(overlayWidth, overlayHeight), selectionRect, toolbarSize);
-            _toolbar.Margin = new Thickness(placed.X, placed.Y, 0, 0);
+            Rect selection = ToLogical(_surface.Selection);
+            _toolbarRect = ComputeToolbarRect(new Size(overlayWidth, overlayHeight), selection, toolbarSize);
+            Canvas.SetLeft(_toolbar, _toolbarRect.X);
+            Canvas.SetTop(_toolbar, _toolbarRect.Y);
+            UpdateMagnifier();
         }
 
         internal static Rect ComputeToolbarRect(
@@ -162,55 +250,110 @@ namespace FreePin.UI
             double gap = 8, double edge = 8)
         {
             if (overlaySize.Width <= 0 || overlaySize.Height <= 0)
-                return new Rect(0, 0, 0, 0);
+                return new Rect();
 
-            double toolbarWidth = Math.Max(1, toolbarSize.Width);
-            double toolbarHeight = Math.Max(1, toolbarSize.Height);
-            double maxX = Math.Max(edge, overlaySize.Width - toolbarWidth - edge);
-            double x = selection.X + (selection.Width - toolbarWidth) / 2;
+            double width = Math.Max(1, toolbarSize.Width);
+            double height = Math.Max(1, toolbarSize.Height);
+            double maxX = Math.Max(edge, overlaySize.Width - width - edge);
+            double x = selection.X + (selection.Width - width) / 2;
             x = Math.Max(edge, Math.Min(maxX, x));
 
             double below = selection.Bottom + gap;
-            double above = selection.Top - gap - toolbarHeight;
+            double above = selection.Top - gap - height;
             double y;
-            if (below + toolbarHeight <= overlaySize.Height - edge)
-            {
+            if (below + height <= overlaySize.Height - edge)
                 y = below;
-            }
             else if (above >= edge)
-            {
                 y = above;
-            }
             else
             {
-                double inside = selection.Bottom - toolbarHeight - gap;
-                double maxY = Math.Max(edge, overlaySize.Height - toolbarHeight - edge);
-                y = Math.Max(edge, Math.Min(maxY, inside));
+                double maxY = Math.Max(edge, overlaySize.Height - height - edge);
+                y = Math.Max(edge, Math.Min(maxY, selection.Bottom - height - gap));
             }
 
-            return new Rect(
-                Math.Round(x), Math.Round(y),
-                Math.Round(toolbarWidth), Math.Round(toolbarHeight));
+            return new Rect(Math.Round(x), Math.Round(y), Math.Round(width), Math.Round(height));
         }
 
-        private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+        private void UpdateMagnifier()
         {
-            if (e.Key == Key.Escape)
+            if (_finished || !_surface.HasSelection || _surface.IsCreatingSelection ||
+                _surface.IsDrawingAnnotation || _surface.IsTextEditing)
             {
-                Cancel();
-                e.Handled = true;
+                _magnifier.Hide();
+                return;
             }
-            else if (e.Key == Key.Enter)
+
+            if (!_surface.IsAdjustingSelection && _surface.Tool != CaptureTool.Eyedropper &&
+                _surface.Tool != CaptureTool.Select)
             {
-                if (_surface.HasSelection)
-                    Finish(CaptureAction.Copy);
-                e.Handled = true;
+                _magnifier.Hide();
+                return;
             }
+
+            Point anchor = _surface.MagnifierAnchor;
+            _magnifier.Update(_frame, anchor);
+            if (_magnifier.Visibility != Visibility.Visible)
+                return;
+
+            _magnifier.Measure(new Size(_magnifier.Width, _magnifier.Height));
+            Size size = _magnifier.DesiredSize;
+            Rect selection = ToLogical(_surface.Selection);
+            Point pointer = ToLogical(anchor);
+            double overlayWidth = ActualWidth > 0 ? ActualWidth : Width;
+            double overlayHeight = ActualHeight > 0 ? ActualHeight : Height;
+            Rect placed = ComputeMagnifierRect(new Size(overlayWidth, overlayHeight), selection,
+                _toolbarRect, size, pointer);
+            Canvas.SetLeft(_magnifier, placed.X);
+            Canvas.SetTop(_magnifier, placed.Y);
+        }
+
+        private static Rect ComputeMagnifierRect(Size overlay, Rect selection, Rect toolbar,
+            Size magnifier, Point pointer, double gap = 10, double edge = 8)
+        {
+            var candidates = new[]
+            {
+                new Rect(selection.Right + gap, pointer.Y - magnifier.Height / 2, magnifier.Width, magnifier.Height),
+                new Rect(selection.Left - gap - magnifier.Width, pointer.Y - magnifier.Height / 2, magnifier.Width, magnifier.Height),
+                new Rect(pointer.X - magnifier.Width / 2, selection.Top - gap - magnifier.Height, magnifier.Width, magnifier.Height),
+                new Rect(pointer.X - magnifier.Width / 2, selection.Bottom + gap, magnifier.Width, magnifier.Height)
+            };
+            foreach (Rect candidate in candidates)
+            {
+                Rect clamped = ClampRect(candidate, overlay, edge);
+                if (toolbar.IsEmpty || !Intersects(clamped, toolbar))
+                    return clamped;
+            }
+            return ClampRect(candidates[0], overlay, edge);
+        }
+
+        private static Rect ClampRect(Rect rect, Size overlay, double edge)
+        {
+            double x = Math.Max(edge, Math.Min(overlay.Width - rect.Width - edge, rect.X));
+            double y = Math.Max(edge, Math.Min(overlay.Height - rect.Height - edge, rect.Y));
+            return new Rect(Math.Round(x), Math.Round(y), Math.Round(rect.Width), Math.Round(rect.Height));
+        }
+
+        private static bool Intersects(Rect a, Rect b)
+        {
+            return !a.IsEmpty && !b.IsEmpty && a.IntersectsWith(b);
+        }
+
+        private Rect ToLogical(DrawingRectangle rect)
+        {
+            return new Rect(rect.X / _scale, rect.Y / _scale, rect.Width / _scale, rect.Height / _scale);
+        }
+
+        private Point ToLogical(Point physical)
+        {
+            return new Point(physical.X / _scale, physical.Y / _scale);
         }
 
         private void Cancel()
         {
+            if (_finished)
+                return;
             _finished = true;
+            Hide();
             Close();
         }
 
@@ -220,7 +363,7 @@ namespace FreePin.UI
                 return;
 
             DrawingRectangle selection = _surface.Selection;
-            System.Drawing.Bitmap cropped;
+            DrawingBitmap cropped;
             try
             {
                 cropped = ScreenCapture.Crop(_frame.Bitmap, selection);
@@ -233,11 +376,36 @@ namespace FreePin.UI
                 return;
             }
 
-            BitmapSource source = ScreenCapture.ToBitmapSource(cropped);
-            source.Freeze();
+            BitmapSource source;
+            DrawingBitmap resultImage;
+            try
+            {
+                if (action == CaptureAction.LongCapture)
+                {
+                    source = ScreenCapture.ToBitmapSource(cropped);
+                    source.Freeze();
+                    resultImage = cropped;
+                }
+                else
+                {
+                    List<Annotation> annotations = _surface.Annotations.Select(a => a.Clone()).ToList();
+                    source = AnnotationRenderer.Render(cropped, annotations);
+                    source.Freeze();
+                    resultImage = ImageUtil.ToBitmap(source);
+                    cropped.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("合成标注失败", ex);
+                NotifyFailure("合成标注失败：" + ex.Message);
+                cropped.Dispose();
+                return;
+            }
+
             var result = new CaptureResult
             {
-                Image = cropped,
+                Image = resultImage,
                 Source = source,
                 Action = action,
                 ScreenBounds = new DrawingRectangle(
@@ -248,8 +416,6 @@ namespace FreePin.UI
             };
             _finished = true;
 
-            // Keep the overlay in the foreground while the result is handed over,
-            // so editors/pins opened from here can take foreground focus.
             try
             {
                 if (_completed != null)
@@ -263,181 +429,17 @@ namespace FreePin.UI
             Hide();
             Close();
         }
-    }
 
-    internal sealed class CaptureSurface : FrameworkElement
-    {
-        private readonly ScreenFrame _frame;
-        private readonly double _scale;
-        private Point _startLogical;
-        private Point _currentLogical;
-        private bool _dragging;
-        private Point _mouseLogical;
-        private DrawingRectangle _selection;
-
-        public CaptureSurface(ScreenFrame frame, double scale)
+        private void NotifyFailure(string message)
         {
-            _frame = frame;
-            _scale = scale <= 0 ? 1 : scale;
-            Focusable = true;
-            Cursor = Cursors.Cross;
-            ClipToBounds = true;
-        }
-
-        public event EventHandler SelectionChanged;
-
-        public DrawingRectangle Selection
-        {
-            get { return _selection; }
-        }
-
-        public bool HasSelection
-        {
-            get { return _selection.Width >= 2 && _selection.Height >= 2; }
-        }
-
-        public bool IsDragging
-        {
-            get { return _dragging; }
-        }
-
-        protected override void OnRender(DrawingContext dc)
-        {
-            var full = new Rect(0, 0, ActualWidth, ActualHeight);
-            dc.DrawImage(_frame.ImageSource, full);
-
-            var dim = new SolidColorBrush(Color.FromArgb(105, 0, 0, 0));
-            dim.Freeze();
-            dc.DrawRectangle(dim, null, full);
-
-            if (HasSelection)
+            try
             {
-                Rect selected = ToLogical(_selection);
-                dc.PushClip(new RectangleGeometry(selected));
-                dc.DrawImage(_frame.ImageSource, full);
-                dc.Pop();
-
-                var borderBrush = new SolidColorBrush(Color.FromRgb(255, 255, 255));
-                borderBrush.Freeze();
-                var borderPen = new Pen(borderBrush, 1.5);
-                borderPen.Freeze();
-                dc.DrawRectangle(null, borderPen, selected);
-
-                DrawHandles(dc, selected);
+                MessageBox.Show(this, message, "FreePin", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
-            else
+            catch
             {
-                DrawHint(dc, full);
+                // Ignore UI failures in the overlay.
             }
-
-            if (_dragging)
-            {
-                var lineBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255));
-                lineBrush.Freeze();
-                var linePen = new Pen(lineBrush, 1) { DashStyle = new DashStyle(new double[] { 4, 4 }, 0) };
-                linePen.Freeze();
-                dc.DrawLine(linePen, new Point(_mouseLogical.X, 0), new Point(_mouseLogical.X, ActualHeight));
-                dc.DrawLine(linePen, new Point(0, _mouseLogical.Y), new Point(ActualWidth, _mouseLogical.Y));
-            }
-        }
-
-        private void DrawHint(DrawingContext dc, Rect full)
-        {
-            var text = new FormattedText("拖动鼠标选择截图区域 · Enter 复制 · Esc 取消",
-                System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                new Typeface("Microsoft YaHei"), 15, Brushes.White, 1.0);
-            double width = text.WidthIncludingTrailingWhitespace + 28;
-            double height = text.Height + 16;
-            var box = new Rect((full.Width - width) / 2, 28, width, height);
-            var background = new SolidColorBrush(Color.FromArgb(190, 20, 23, 28));
-            background.Freeze();
-            dc.DrawRoundedRectangle(background, null, box, 6, 6);
-            dc.DrawText(text, new Point(box.X + 14, box.Y + 8));
-        }
-
-        private static void DrawHandles(DrawingContext dc, Rect rect)
-        {
-            var fill = new SolidColorBrush(Colors.White);
-            fill.Freeze();
-            var pen = new Pen(new SolidColorBrush(Color.FromRgb(0, 120, 215)), 1);
-            pen.Freeze();
-            double s = 6;
-            Point[] points =
-            {
-                new Point(rect.Left, rect.Top), new Point(rect.Right, rect.Top),
-                new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Bottom)
-            };
-            foreach (Point point in points)
-                dc.DrawRectangle(fill, pen, new Rect(point.X - s / 2, point.Y - s / 2, s, s));
-        }
-
-        private Rect ToLogical(DrawingRectangle rect)
-        {
-            return new Rect(rect.X / _scale, rect.Y / _scale, rect.Width / _scale, rect.Height / _scale);
-        }
-
-        protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
-        {
-            base.OnMouseLeftButtonDown(e);
-            Focus();
-            _dragging = true;
-            _startLogical = e.GetPosition(this);
-            _currentLogical = _startLogical;
-            _selection = new DrawingRectangle(0, 0, 0, 0);
-            CaptureMouse();
-            SelectionChanged?.Invoke(this, EventArgs.Empty);
-            InvalidateVisual();
-            e.Handled = true;
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            Point position = e.GetPosition(this);
-            _mouseLogical = position;
-            if (_dragging)
-            {
-                _currentLogical = position;
-                UpdateSelection();
-            }
-            InvalidateVisual();
-        }
-
-        protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
-        {
-            base.OnMouseLeftButtonUp(e);
-            if (!_dragging)
-                return;
-            _dragging = false;
-            _currentLogical = e.GetPosition(this);
-            UpdateSelection();
-            ReleaseMouseCapture();
-            if (!HasSelection)
-            {
-                _selection = new DrawingRectangle(0, 0, 0, 0);
-                SelectionChanged?.Invoke(this, EventArgs.Empty);
-            }
-            InvalidateVisual();
-            e.Handled = true;
-        }
-
-        private void UpdateSelection()
-        {
-            double x1 = Math.Min(_startLogical.X, _currentLogical.X);
-            double y1 = Math.Min(_startLogical.Y, _currentLogical.Y);
-            double x2 = Math.Max(_startLogical.X, _currentLogical.X);
-            double y2 = Math.Max(_startLogical.Y, _currentLogical.Y);
-
-            int left = (int)Math.Round(x1 * _scale);
-            int top = (int)Math.Round(y1 * _scale);
-            int right = (int)Math.Round(x2 * _scale);
-            int bottom = (int)Math.Round(y2 * _scale);
-            left = Math.Max(0, Math.Min(_frame.Bounds.Width, left));
-            top = Math.Max(0, Math.Min(_frame.Bounds.Height, top));
-            right = Math.Max(0, Math.Min(_frame.Bounds.Width, right));
-            bottom = Math.Max(0, Math.Min(_frame.Bounds.Height, bottom));
-            _selection = new DrawingRectangle(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
-            SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 }

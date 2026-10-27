@@ -87,6 +87,11 @@
     <Compile Include="Imaging\AnnotationCanvas.cs" />
     <Compile Include="Imaging\ImageUtil.cs" />
     <Compile Include="UI\UiTheme.cs" />
+    <Compile Include="UI\CaptureGeometry.cs" />
+    <Compile Include="UI\CaptureStyle.cs" />
+    <Compile Include="UI\CaptureSurface.cs" />
+    <Compile Include="UI\CaptureToolbar.cs" />
+    <Compile Include="UI\PixelMagnifier.cs" />
     <Compile Include="UI\CaptureOverlayWindow.cs" />
     <Compile Include="UI\LongCaptureWindow.cs" />
     <Compile Include="UI\EditorWindow.cs" />

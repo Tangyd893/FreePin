@@ -11,6 +11,7 @@ using FreePin.Services;
 using FreePin.UI;
 using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Win32;
+using DrawingBitmap = System.Drawing.Bitmap;
 
 namespace FreePin
 {
@@ -211,9 +212,9 @@ namespace FreePin
                         result.Image.Dispose();
                         break;
 
-                    case CaptureAction.Edit:
                     case CaptureAction.Ocr:
-                        OpenEditor(result, result.Action == CaptureAction.Ocr);
+                        ShowOcr(result.Source);
+                        result.Image.Dispose();
                         break;
 
                     case CaptureAction.LongCapture:
@@ -229,11 +230,35 @@ namespace FreePin
             }
         }
 
-        private void OpenEditor(CaptureResult result, bool ocr)
+        private async void ShowOcr(BitmapSource source)
+        {
+            if (source == null)
+                return;
+            if (!_ocr.IsAvailable)
+            {
+                Notify("无法识别文字", "系统未安装可用的 OCR 语言。");
+                return;
+            }
+
+            try
+            {
+                string text = await _ocr.RecognizeAsync(source);
+                var window = new TextResultWindow(source, text, _ocr.LanguageName);
+                window.Show();
+                window.Activate();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("OCR 识别失败", ex);
+                Notify("OCR 识别失败", ex.Message);
+            }
+        }
+
+        private void OpenEditor(DrawingBitmap image, BitmapSource source, bool ocr)
         {
             try
             {
-                _editor = new EditorWindow(result.Image, result.Source, ScreenCapture.PrimaryScale, _ocr,
+                _editor = new EditorWindow(image, source, ScreenCapture.PrimaryScale, _ocr,
                     ShowPin, ocr);
                 _editor.Closed += (s, e) => _editor = null;
                 _editor.Show();
@@ -241,7 +266,8 @@ namespace FreePin
             }
             catch (Exception ex)
             {
-                result.Image.Dispose();
+                if (image != null)
+                    image.Dispose();
                 throw new InvalidOperationException("打开编辑器失败：" + ex.Message, ex);
             }
         }
@@ -278,12 +304,7 @@ namespace FreePin
             _cache.Save(result.Image);
             try
             {
-                OpenEditor(new CaptureResult
-                {
-                    Image = result.Image,
-                    Source = result.Source,
-                    Action = CaptureAction.Edit
-                }, false);
+                OpenEditor(result.Image, result.Source, false);
             }
             catch (Exception ex)
             {

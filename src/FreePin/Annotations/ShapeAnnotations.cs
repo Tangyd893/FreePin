@@ -123,6 +123,7 @@ namespace FreePin.Annotations
     public sealed class RectangleAnnotation : Annotation
     {
         public Rect Area { get; set; }
+        public double CornerRadius { get; set; }
 
         public override Rect Bounds
         {
@@ -148,7 +149,16 @@ namespace FreePin.Annotations
 
         public override void Draw(DrawingContext dc, BitmapSource source)
         {
-            dc.DrawRectangle(null, CreatePen(Color, Thickness), Area);
+            if (CornerRadius <= 0.1)
+            {
+                dc.DrawRectangle(null, CreatePen(Color, Thickness), Area);
+                return;
+            }
+            double radius = Math.Min(CornerRadius, Math.Min(Area.Width, Area.Height) / 2);
+            if (radius <= 0.1)
+                dc.DrawRectangle(null, CreatePen(Color, Thickness), Area);
+            else
+                dc.DrawRoundedRectangle(null, CreatePen(Color, Thickness), Area, radius, radius);
         }
 
         public override void Move(double dx, double dy)
@@ -158,7 +168,7 @@ namespace FreePin.Annotations
 
         public override Annotation Clone()
         {
-            var clone = new RectangleAnnotation { Area = Area };
+            var clone = new RectangleAnnotation { Area = Area, CornerRadius = CornerRadius };
             CopyStyleTo(clone);
             return clone;
         }
