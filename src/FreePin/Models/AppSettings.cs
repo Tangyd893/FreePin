@@ -16,6 +16,7 @@ namespace FreePin.Models
         public double CaptureThickness { get; set; } = 3;
         public bool PinDoubleClickCloses { get; set; } = true;
         public bool SmartSelectionEnabled { get; set; } = true;
+        public bool StartWithWindows { get; set; }
 
         public HotkeyBinding ScreenshotHotkey { get; set; } = HotkeyBinding.DefaultScreenshot();
         public HotkeyBinding PinHotkey { get; set; } = HotkeyBinding.DefaultPin();
@@ -66,6 +67,7 @@ namespace FreePin.Models
                 CaptureThickness = CaptureThickness,
                 PinDoubleClickCloses = PinDoubleClickCloses,
                 SmartSelectionEnabled = SmartSelectionEnabled,
+                StartWithWindows = StartWithWindows,
                 ScreenshotHotkey = ScreenshotHotkey.Clone(),
                 PinHotkey = PinHotkey.Clone(),
                 CacheHotkey = CacheHotkey.Clone(),

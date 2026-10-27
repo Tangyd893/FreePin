@@ -57,6 +57,16 @@ namespace FreePin
             {
                 CreateMessageWindow();
                 CreateTray();
+                try
+                {
+                    _settings.StartWithWindows = StartupService.IsEnabled();
+                    if (_settings.StartWithWindows)
+                        StartupService.RefreshCommandIfEnabled();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("读取开机自启动状态失败: " + ex.Message);
+                }
                 _hotkeys = new HotkeyManager(_messageWindow);
                 _hotkeys.Pressed += OnHotkey;
                 var errors = new List<string>();
@@ -515,6 +525,13 @@ namespace FreePin
             if (!_hotkeys.TryApply(draft, out errors))
                 return string.Join("\n", errors);
 
+            string startupError = StartupService.Apply(draft.StartWithWindows);
+            if (startupError != null)
+            {
+                _hotkeys.TryApply(backup, out errors);
+                return startupError;
+            }
+
             try
             {
                 _settingsService.Save(draft);
@@ -523,6 +540,7 @@ namespace FreePin
             {
                 Log.Error("保存设置失败", ex);
                 _hotkeys.TryApply(backup, out errors);
+                StartupService.Apply(backup.StartWithWindows);
                 return "保存设置失败：" + ex.Message;
             }
 

@@ -76,6 +76,7 @@
     <Compile Include="Models\HotkeyBinding.cs" />
     <Compile Include="Services\Log.cs" />
     <Compile Include="Services\SettingsService.cs" />
+    <Compile Include="Services\StartupService.cs" />
     <Compile Include="Services\CacheService.cs" />
     <Compile Include="Services\HotkeyManager.cs" />
     <Compile Include="Services\ScreenCapture.cs" />

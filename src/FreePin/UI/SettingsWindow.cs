@@ -26,6 +26,7 @@ namespace FreePin.UI
         private readonly CheckBox _rememberCaptureStyle;
         private readonly CheckBox _smartSelection;
         private readonly CheckBox _pinDoubleClickCloses;
+        private readonly CheckBox _startWithWindows;
         private HotkeyAction? _captureAction;
 
         public SettingsWindow(AppSettings draft, Func<AppSettings, string> save)
@@ -36,7 +37,7 @@ namespace FreePin.UI
 
             Title = "FreePin - 设置";
             Width = 650;
-            Height = 720;
+            Height = 760;
             MinWidth = 580;
             MinHeight = 600;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -61,6 +62,21 @@ namespace FreePin.UI
             var subtitle = UiTheme.Text("所有设置保存在本机，不上传任何数据。", 12, UiTheme.Muted);
             subtitle.Margin = new Thickness(0, 3, 0, 16);
             content.Children.Add(subtitle);
+
+            content.Children.Add(SectionTitle("启动"));
+            _startWithWindows = new CheckBox
+            {
+                Content = "开机自启动",
+                IsChecked = _draft.StartWithWindows,
+                Foreground = UiTheme.Brush(UiTheme.Foreground),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            content.Children.Add(_startWithWindows);
+            var startupHint = UiTheme.Text("登录 Windows 后自动在托盘运行；仅当前用户，不需要管理员权限。",
+                12, UiTheme.Muted);
+            startupHint.TextWrapping = TextWrapping.Wrap;
+            startupHint.Margin = new Thickness(0, 0, 0, 14);
+            content.Children.Add(startupHint);
 
             content.Children.Add(SectionTitle("截图标注"));
             _rememberCaptureStyle = new CheckBox
@@ -356,6 +372,7 @@ namespace FreePin.UI
             _draft.RememberCaptureStyle = _rememberCaptureStyle.IsChecked == true;
             _draft.SmartSelectionEnabled = _smartSelection.IsChecked == true;
             _draft.PinDoubleClickCloses = _pinDoubleClickCloses.IsChecked == true;
+            _draft.StartWithWindows = _startWithWindows.IsChecked == true;
 
             foreach (var pair in _hotkeyChecks)
                 HotkeyManager.GetBinding(_draft, pair.Key).Enabled = pair.Value.IsChecked == true;

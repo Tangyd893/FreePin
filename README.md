@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/.NET%20Framework-4.8-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET Framework 4.8">
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows 10 / 11">
   <img src="https://img.shields.io/badge/UI-WPF-7B5AA6?style=for-the-badge" alt="WPF">
-  <img src="https://img.shields.io/badge/Version-1.3.1-B44E32?style=for-the-badge" alt="v1.3.1">
+  <img src="https://img.shields.io/badge/Version-1.4.0-B44E32?style=for-the-badge" alt="v1.4.0">
   <img src="https://img.shields.io/badge/License-MIT-2EA44F?style=for-the-badge" alt="MIT">
 </p>
 
@@ -85,7 +85,7 @@ FreePin/
 
 直接下载可用版本（推荐）：
 
-从 [GitHub Releases](https://github.com/Tangyd893/FreePin/releases) 下载 `FreePin-v1.3.1-win-x64.zip`，解压后运行 `FreePin.exe`。
+从 [GitHub Releases](https://github.com/Tangyd893/FreePin/releases) 下载 `FreePin-v1.4.0-win-x64.zip`，解压后运行 `FreePin.exe`。
 
 从源码构建：
 
@@ -164,6 +164,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Clean
 
 - 三个全局快捷键均可单独启用/停用、重新绑定；保存时检查冲突，失败不会破坏当前生效的快捷键。
 - 截图颜色与笔触大小可记忆，可在设置中关闭。
+- **开机自启动**可开关：写入当前用户 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不请求管理员权限；便携目录移动后，下次启动会自动修正启动命令。
 - 单实例运行，关闭窗口后驻留托盘。
 - 不联网、不上传截图；设置、日志、缓存全部在 `%LOCALAPPDATA%\FreePin`。
 
@@ -171,7 +172,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Clean
 
 | 路径 | 内容 |
 |:-----|------|
-| `%LOCALAPPDATA%\FreePin\settings.json` | 快捷键、缓存策略、截图样式、智能选区等设置 |
+| `%LOCALAPPDATA%\FreePin\settings.json` | 快捷键、缓存策略、截图样式、智能选区、开机自启动等设置 |
 | `%LOCALAPPDATA%\FreePin\Cache\FreePin_yyyyMMdd_HHmmss_fff.png` | 最近截图缓存 |
 | `%LOCALAPPDATA%\FreePin\Logs\freepin.log` | 运行日志 |
 
@@ -251,6 +252,7 @@ Win32 + System.Windows.Automation + Windows Runtime
 | 构建时提示禁止运行脚本 | 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1`。 |
 | 构建失败，找不到 `Windows.winmd` | 修改 `src\FreePin\FreePin.csproj` 里的 Windows SDK 路径，指向本机已安装的 `UnionMetadata\<版本>\Windows.winmd`。 |
 | 翻译功能在哪里 | 已从当前版本移除，作为后续扩展项；界面不显示翻译入口。 |
+| 开机自启动没有生效 | 在设置中勾选「开机自启动」并保存；Windows 11 可能在「任务管理器 → 启动应用」中把它标记为关闭，请在那里恢复。 |
 | FreePin 会把截图上传吗 | 不会。截图、OCR、智能选区全部在本机完成。 |
 
 ## 📜 License
