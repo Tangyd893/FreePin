@@ -34,6 +34,9 @@ namespace FreePin.UI
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = false;
             Topmost = true;
+            FontFamily = UiTheme.UiFont;
+            Foreground = UiTheme.Brush(UiTheme.Foreground);
+            UiTheme.ApplyWindowIcon(this);
 
             var root = new Border
             {
@@ -44,10 +47,10 @@ namespace FreePin.UI
                 Margin = new Thickness(12),
                 Effect = new DropShadowEffect
                 {
-                    BlurRadius = 28,
-                    ShadowDepth = 0,
-                    Opacity = 0.55,
-                    Color = Colors.Black
+                    BlurRadius = 30,
+                    ShadowDepth = 2,
+                    Opacity = 0.28,
+                    Color = Color.FromRgb(70, 55, 40)
                 }
             };
 
@@ -183,9 +186,9 @@ namespace FreePin.UI
 
             var imageBorder = new Border
             {
-                Background = UiTheme.Brush(Color.FromRgb(18, 21, 26)),
+                Background = UiTheme.Brush(UiTheme.CanvasBackground),
                 Child = image,
-                CornerRadius = new CornerRadius(4)
+                CornerRadius = new CornerRadius(5)
             };
 
             var time = UiTheme.Text(entry.DisplayTime, 12, UiTheme.Foreground);

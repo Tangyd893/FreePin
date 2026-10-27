@@ -91,9 +91,10 @@ namespace FreePin
             _tray = new TaskbarIcon
             {
                 Icon = ImageUtil.LoadTrayIcon(),
-                ToolTipText = "FreePin - Ctrl+1 截图"
+                ToolTipText = "FreePin · 左键截图，右键菜单",
+                NoLeftClickDelay = true
             };
-            _tray.TrayMouseDoubleClick += (s, e) => ShowCache();
+            _tray.TrayLeftMouseUp += (s, e) => StartScreenshotFromTray();
             UpdateTrayMenu();
         }
 
@@ -110,13 +111,20 @@ namespace FreePin
             menu.Items.Add(TrayItem("设置", null, ShowSettings));
             menu.Items.Add(new Separator());
             menu.Items.Add(TrayItem("退出 FreePin", null, Exit));
+            UiTheme.StyleContextMenu(menu);
             _tray.ContextMenu = menu;
-            _tray.ToolTipText = "FreePin - " + _settings.ScreenshotHotkey.Display + " 截图";
+            _tray.ToolTipText = "FreePin · 左键截图，右键菜单";
         }
 
         private static MenuItem TrayItem(string header, string gesture, Action action)
         {
-            var item = new MenuItem { Header = header, InputGestureText = gesture ?? string.Empty };
+            var item = new MenuItem
+            {
+                Header = header,
+                InputGestureText = gesture ?? string.Empty,
+                FontFamily = UiTheme.UiFont,
+                Foreground = UiTheme.Brush(UiTheme.Foreground)
+            };
             item.Click += (s, e) => action();
             return item;
         }
@@ -142,6 +150,9 @@ namespace FreePin
 
         private async void StartScreenshotFromTray()
         {
+            if (_disposed || _settingsWindow != null)
+                return;
+
             // Let the tray menu close before capturing the screen.
             await System.Threading.Tasks.Task.Delay(120);
             StartScreenshot();

@@ -38,16 +38,15 @@ namespace FreePin.UI
                 dpiScale = 1;
 
             Title = "FreePin - 编辑截图";
-            Background = UiTheme.Brush(UiTheme.Background);
-            Foreground = UiTheme.Brush(UiTheme.Foreground);
+            UiTheme.ApplyWindow(this);
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = true;
-            MinWidth = 640;
+            MinWidth = 760;
             MinHeight = 480;
 
             double displayedWidth = source.PixelWidth / dpiScale;
             double displayedHeight = source.PixelHeight / dpiScale;
-            Width = Math.Min(1680, Math.Max(720, displayedWidth + 80));
+            Width = Math.Min(1680, Math.Max(920, displayedWidth + 80));
             Height = Math.Min(960, Math.Max(520, displayedHeight + 160));
 
             var root = new Grid();
@@ -68,13 +67,13 @@ namespace FreePin.UI
             {
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Background = UiTheme.Brush(Color.FromRgb(13, 15, 18)),
+                Background = UiTheme.Brush(UiTheme.CanvasBackground),
                 Padding = new Thickness(10)
             };
             var canvasHost = new Border
             {
-                Background = UiTheme.Brush(Color.FromRgb(13, 15, 18)),
-                BorderBrush = UiTheme.Brush(UiTheme.Border),
+                Background = UiTheme.Brush(UiTheme.CanvasBackground),
+                BorderBrush = UiTheme.Brush(UiTheme.CanvasBorder),
                 BorderThickness = new Thickness(1),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Top,
@@ -119,25 +118,11 @@ namespace FreePin.UI
                 Padding = new Thickness(10, 7, 10, 7)
             };
 
-            // Keep the actions pinned to the right. The drawing tools can wrap
-            // independently when the editor window is narrow, instead of
-            // splitting the action labels across two rows.
-            var dock = new DockPanel();
-            var actions = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            actions.Children.Add(Separator());
-            _ocrButton = ActionButton("识别文字", "使用 Windows OCR 识别文字", async (s, e) => await RunOcrAsync());
-            actions.Children.Add(_ocrButton);
-            actions.Children.Add(ActionButton("复制", "复制到剪贴板 (Ctrl+C)", (s, e) => CopyToClipboard(), true));
-            actions.Children.Add(ActionButton("贴图", "把当前图片贴到桌面最上层", (s, e) => Pin()));
-            actions.Children.Add(ActionButton("保存", "保存为 PNG (Ctrl+S)", (s, e) => SaveAs(), true));
-            actions.Children.Add(ActionButton("关闭", "关闭编辑器 (Esc)", (s, e) => Close()));
-            DockPanel.SetDock(actions, Dock.Right);
-            dock.Children.Add(actions);
+            var panel = new StackPanel();
 
+            // Drawing controls live on their own row. The editor can be narrow,
+            // and wrapping this row is still readable; the action labels stay
+            // together on a deliberate second row instead of splitting.
             var main = new WrapPanel { Orientation = Orientation.Horizontal };
             AddTool(main, "↖", "选择/移动 (V)", EditorTool.Select);
             AddTool(main, "□", "矩形 (R)", EditorTool.Rectangle);
@@ -152,11 +137,11 @@ namespace FreePin.UI
 
             var colors = new[]
             {
-                Color.FromRgb(240, 62, 62), Color.FromRgb(255, 146, 43),
-                Color.FromRgb(250, 176, 5), Color.FromRgb(64, 192, 87),
-                Color.FromRgb(34, 184, 207), Color.FromRgb(34, 139, 230),
-                Color.FromRgb(121, 80, 242), Color.FromRgb(33, 37, 41),
-                Color.FromRgb(255, 255, 255)
+                Color.FromRgb(180, 78, 50), Color.FromRgb(217, 119, 46),
+                Color.FromRgb(217, 162, 27), Color.FromRgb(94, 140, 97),
+                Color.FromRgb(60, 140, 140), Color.FromRgb(63, 111, 168),
+                Color.FromRgb(123, 90, 166), Color.FromRgb(47, 42, 37),
+                Color.FromRgb(255, 253, 247)
             };
             foreach (Color color in colors)
                 AddColor(main, color);
@@ -187,9 +172,23 @@ namespace FreePin.UI
             _redoButton = UiTheme.ToolButton("↷", "重做 (Ctrl+Y)", (s, e) => _canvas.Redo());
             main.Children.Add(_undoButton);
             main.Children.Add(_redoButton);
-            dock.Children.Add(main);
+            panel.Children.Add(main);
 
-            border.Child = dock;
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 6, 0, 0)
+            };
+            _ocrButton = ActionButton("识别文字", "使用 Windows OCR 识别文字", async (s, e) => await RunOcrAsync());
+            actions.Children.Add(_ocrButton);
+            actions.Children.Add(ActionButton("复制", "复制到剪贴板 (Ctrl+C)", (s, e) => CopyToClipboard(), true));
+            actions.Children.Add(ActionButton("贴图", "把当前图片贴到桌面最上层", (s, e) => Pin()));
+            actions.Children.Add(ActionButton("保存", "保存为 PNG (Ctrl+S)", (s, e) => SaveAs(), true));
+            actions.Children.Add(ActionButton("关闭", "关闭编辑器 (Esc)", (s, e) => Close()));
+            panel.Children.Add(actions);
+
+            border.Child = panel;
             return border;
         }
 

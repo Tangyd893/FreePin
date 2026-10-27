@@ -38,14 +38,14 @@ namespace FreePin.UI
 
             var border = new Border
             {
-                Background = Brushes.Black,
-                BorderBrush = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
+                Background = UiTheme.Brush(UiTheme.CanvasBackground),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(220, 223, 208, 188)),
                 BorderThickness = new Thickness(1),
                 Effect = new DropShadowEffect
                 {
-                    BlurRadius = 18,
-                    ShadowDepth = 0,
-                    Opacity = 0.45,
+                    BlurRadius = 20,
+                    ShadowDepth = 2,
+                    Opacity = 0.35,
                     Color = Colors.Black
                 }
             };

@@ -17,8 +17,7 @@ namespace FreePin.UI
             MinHeight = 360;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = false;
-            Background = UiTheme.Brush(UiTheme.Background);
-            Foreground = UiTheme.Brush(UiTheme.Foreground);
+            UiTheme.ApplyWindow(this);
 
             var root = new DockPanel { Margin = new Thickness(14) };
 
@@ -68,7 +67,7 @@ namespace FreePin.UI
             var imageBorder = new Border
             {
                 Background = UiTheme.Brush(UiTheme.Panel),
-                BorderBrush = UiTheme.Brush(UiTheme.Border),
+                BorderBrush = UiTheme.Brush(UiTheme.CanvasBorder),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(6)
@@ -97,7 +96,7 @@ namespace FreePin.UI
                 BorderBrush = UiTheme.Brush(UiTheme.Border),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(10),
-                FontFamily = new FontFamily("Microsoft YaHei"),
+                FontFamily = UiTheme.UiFont,
                 FontSize = 15
             };
             _text = textBox;

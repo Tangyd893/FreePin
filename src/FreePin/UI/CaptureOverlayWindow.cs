@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using FreePin.Imaging;
 using FreePin.Services;
 using DrawingBitmap = System.Drawing.Bitmap;
@@ -59,7 +60,7 @@ namespace FreePin.UI
             Width = frame.Bounds.Width / _scale;
             Height = frame.Bounds.Height / _scale;
 
-            var root = new Grid();
+            var root = new Grid { ClipToBounds = true };
             _surface = new CaptureSurface(frame, _scale);
             _surface.SelectionChanged += (s, e) => UpdateToolbar();
             root.Children.Add(_surface);
@@ -71,9 +72,9 @@ namespace FreePin.UI
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(10, 7, 10, 7),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(16, 16, 16, 24),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0),
                 Visibility = Visibility.Collapsed
             };
 
@@ -106,16 +107,90 @@ namespace FreePin.UI
                 Activate();
                 _surface.Focus();
                 Keyboard.Focus(_surface);
+                PlaceToolbar();
             };
         }
 
         private void UpdateToolbar()
         {
             DrawingRectangle selection = _surface.Selection;
-            bool hasSelection = selection.Width >= 2 && selection.Height >= 2;
+            bool hasSelection = selection.Width >= 2 && selection.Height >= 2 && !_surface.IsDragging;
             _toolbar.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
             if (hasSelection)
+            {
                 _size.Text = selection.Width + " × " + selection.Height + "  ";
+                SchedulePlaceToolbar();
+            }
+        }
+
+        private void SchedulePlaceToolbar()
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PlaceToolbar));
+        }
+
+        private void PlaceToolbar()
+        {
+            if (_finished || _toolbar.Visibility != Visibility.Visible)
+                return;
+
+            double overlayWidth = ActualWidth > 0 ? ActualWidth : Width;
+            double overlayHeight = ActualHeight > 0 ? ActualHeight : Height;
+            if (overlayWidth <= 0 || overlayHeight <= 0)
+                return;
+
+            _toolbar.MaxWidth = Math.Max(1, overlayWidth - 16);
+            _toolbar.Measure(new Size(_toolbar.MaxWidth, double.PositiveInfinity));
+            Size toolbarSize = _toolbar.DesiredSize;
+            if (toolbarSize.Width <= 0 || toolbarSize.Height <= 0)
+                toolbarSize = new Size(_toolbar.ActualWidth, _toolbar.ActualHeight);
+            if (toolbarSize.Width <= 0 || toolbarSize.Height <= 0)
+                return;
+
+            DrawingRectangle selection = _surface.Selection;
+            var selectionRect = new Rect(
+                selection.X / _scale,
+                selection.Y / _scale,
+                selection.Width / _scale,
+                selection.Height / _scale);
+            Rect placed = ComputeToolbarRect(
+                new Size(overlayWidth, overlayHeight), selectionRect, toolbarSize);
+            _toolbar.Margin = new Thickness(placed.X, placed.Y, 0, 0);
+        }
+
+        internal static Rect ComputeToolbarRect(
+            Size overlaySize, Rect selection, Size toolbarSize,
+            double gap = 8, double edge = 8)
+        {
+            if (overlaySize.Width <= 0 || overlaySize.Height <= 0)
+                return new Rect(0, 0, 0, 0);
+
+            double toolbarWidth = Math.Max(1, toolbarSize.Width);
+            double toolbarHeight = Math.Max(1, toolbarSize.Height);
+            double maxX = Math.Max(edge, overlaySize.Width - toolbarWidth - edge);
+            double x = selection.X + (selection.Width - toolbarWidth) / 2;
+            x = Math.Max(edge, Math.Min(maxX, x));
+
+            double below = selection.Bottom + gap;
+            double above = selection.Top - gap - toolbarHeight;
+            double y;
+            if (below + toolbarHeight <= overlaySize.Height - edge)
+            {
+                y = below;
+            }
+            else if (above >= edge)
+            {
+                y = above;
+            }
+            else
+            {
+                double inside = selection.Bottom - toolbarHeight - gap;
+                double maxY = Math.Max(edge, overlaySize.Height - toolbarHeight - edge);
+                y = Math.Max(edge, Math.Min(maxY, inside));
+            }
+
+            return new Rect(
+                Math.Round(x), Math.Round(y),
+                Math.Round(toolbarWidth), Math.Round(toolbarHeight));
         }
 
         private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -219,6 +294,11 @@ namespace FreePin.UI
         public bool HasSelection
         {
             get { return _selection.Width >= 2 && _selection.Height >= 2; }
+        }
+
+        public bool IsDragging
+        {
+            get { return _dragging; }
         }
 
         protected override void OnRender(DrawingContext dc)

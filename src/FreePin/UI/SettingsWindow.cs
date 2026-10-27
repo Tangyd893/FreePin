@@ -40,8 +40,7 @@ namespace FreePin.UI
             // Shown from the tray; make sure it is visible above a maximized app.
             Topmost = true;
             ShowInTaskbar = false;
-            Background = UiTheme.Brush(UiTheme.Background);
-            Foreground = UiTheme.Brush(UiTheme.Foreground);
+            UiTheme.ApplyWindow(this);
 
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
